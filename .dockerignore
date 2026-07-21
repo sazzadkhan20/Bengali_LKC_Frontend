@@ -1,0 +1,42 @@
+# Dependencies & build output
+node_modules
+.next
+out
+build
+coverage
+.turbo
+
+# VCS / IDE
+.git
+.gitignore
+.gitattributes
+.cursor
+.vscode
+.idea
+
+# Docs & research artifacts (not needed in the image)
+Documents
+README.md
+AGENTS.md
+CLAUDE.md
+LICENSE
+*.md
+!public/**
+
+# Local / debug
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+response.json
+.env*
+!.env.example
+
+# Raw WordNet source (only the compiled ILI JSON is needed)
+data/wordnet21-src
+
+# Docker meta (not needed inside the build context)
+Dockerfile
+docker-compose.yml
+.dockerignore

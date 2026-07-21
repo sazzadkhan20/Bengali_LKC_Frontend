@@ -1,0 +1,164 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-bengali: var(--font-noto-bengali);
+
+  /* Slate color palette (Neutral backgrounds, text, and borders) */
+  --color-slate-50: #f4f3ec;
+  --color-slate-100: #eeede3;
+  --color-slate-200: #e5e4d6;
+  --color-slate-300: #d2d0bc;
+  --color-slate-400: #c0be9e;
+  --color-slate-500: #848870;
+  --color-slate-600: #686c55;
+  --color-slate-700: #484e2e;
+  --color-slate-800: #2d321b;
+  --color-slate-900: #1c1e0e;
+  --color-slate-950: #0f1007;
+
+  /* Emerald color palette (Primary brand theme & Validated states) */
+  --color-emerald-50: #f6f8f2;
+  --color-emerald-100: #eef2e1;
+  --color-emerald-200: #dbdfcc;
+  --color-emerald-300: #c4cbb1;
+  --color-emerald-400: #a3ad86;
+  --color-emerald-500: #7e8c5b;
+  --color-emerald-600: #647044;
+  --color-emerald-700: #576139;
+  --color-emerald-800: #3e4828;
+  --color-emerald-900: #2a311b;
+  --color-emerald-950: #171c0f;
+
+  /* Amber/Yellow color palette (Warnings, Adjectives, Flagged states) */
+  --color-amber-50: #fdfbf7;
+  --color-amber-100: #faf4e6;
+  --color-amber-200: #f3e4c4;
+  --color-amber-300: #cbaf6f;
+  --color-amber-400: #b19656;
+  --color-amber-500: #997c3b;
+  --color-amber-600: #886620;
+  --color-amber-700: #886620;
+  --color-amber-800: #6b5018;
+  --color-amber-900: #523c11;
+  --color-amber-950: #2b1f09;
+
+  /* Rose/Red color palette (Errors, Verbs, Rejected states) */
+  --color-rose-50: #fdf8f7;
+  --color-rose-100: #faece6;
+  --color-rose-200: #f3d4c4;
+  --color-rose-300: #cb9072;
+  --color-rose-400: #b16c4f;
+  --color-rose-500: #99553b;
+  --color-rose-600: #884820;
+  --color-rose-700: #884820;
+  --color-rose-800: #6b3718;
+  --color-rose-900: #522711;
+  --color-rose-950: #2b1409;
+
+  /* Custom Sky/Blue tint (Noun/Info states) */
+  --color-sky-50: #f7fafb;
+  --color-sky-100: #eef5f8;
+  --color-sky-200: #b9d2e2;
+  --color-sky-300: #8eb7d1;
+  --color-sky-400: #659bbd;
+  --color-sky-500: #4982a5;
+  --color-sky-600: #3b6b88;
+  --color-sky-700: #3b6b88;
+  --color-sky-800: #2d5269;
+  --color-sky-900: #203b4b;
+  --color-sky-950: #101e26;
+}
+
+:root {
+  --background: #f4f3ec;
+  --foreground: #1c1e0e;
+  /* Notch / home-indicator safe areas (iPhone, Android gesture bars) */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  /* Fluid page gutter that grows with viewport */
+  --page-gutter: clamp(1rem, 0.75rem + 1.2vw, 2rem);
+}
+
+html {
+  scroll-behavior: smooth;
+  /* Cap root size so OLED/high-DPI browsers that enlarge text still fit */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  /* Prefer crisp subpixel AA on high-DPI / OLED panels */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow-x: clip;
+  min-height: 100dvh;
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+/* Prevent long Bengali / mono strings from blowing out layouts */
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Bengali script rendering (SRS §12.4) */
+.font-bengali {
+  font-family: var(--font-noto-bengali), "Noto Sans Bengali", sans-serif;
+  line-height: 1.65;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Shared content shell used across public + dashboard pages */
+.page-shell {
+  width: 100%;
+  margin-inline: auto;
+  padding-inline: var(--page-gutter);
+}
+
+/* Comfortable touch targets on coarse pointers (phones / tablets) */
+@media (pointer: coarse) {
+  button,
+  [role="button"],
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    min-height: 2.75rem;
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    min-height: 1.25rem;
+    min-width: 1.25rem;
+  }
+}
+
+/* Subtle scrollbars for queue tables */
+.thin-scroll::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 8px;
+}
+
+/* Print-friendly dictionary cards */
+@media print {
+  header,
+  nav,
+  footer {
+    display: none !important;
+  }
+}
