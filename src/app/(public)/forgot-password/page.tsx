@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useI18n } from "@/lib/i18n";
 
 export default function ForgotPasswordPage() {
+  const { t } = useI18n();
   const [identifier, setIdentifier] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [demoPassword, setDemoPassword] = useState<string | null>(null);
@@ -36,12 +38,10 @@ export default function ForgotPasswordPage() {
   return (
     <div className="mx-auto max-w-lg px-4 py-16 sm:px-6">
       <h1 className="text-3xl font-bold tracking-tight text-slate-900">
-        Forgot your password?
+        {t("forgotTitle")}
       </h1>
       <p className="mt-3 text-sm leading-relaxed text-slate-500">
-        Enter your username or registered email address. After email
-        validation, a new one-time password will be sent to your registered
-        address (SRS §3.2). You must change it at your next login.
+        {t("forgotIntro")}
       </p>
 
       <form
@@ -56,7 +56,7 @@ export default function ForgotPasswordPage() {
             htmlFor="identifier"
             className="mb-1.5 block text-sm font-semibold text-slate-700"
           >
-            Username or email
+            {t("usernameOrEmail")}
           </label>
           <input
             id="identifier"
@@ -81,8 +81,7 @@ export default function ForgotPasswordPage() {
                   {demoPassword}
                 </code>
                 <p className="mt-1 text-xs text-emerald-700">
-                  Demo deployment only — in production this one-time password
-                  is delivered exclusively by email.
+                  {t("demoOtpNote")}
                 </p>
               </>
             ) : null}
@@ -93,11 +92,14 @@ export default function ForgotPasswordPage() {
           disabled={busy || !identifier.trim()}
           className="w-full rounded-xl bg-emerald-700 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {busy ? "Sending…" : "Send Reset Email"}
+          {busy ? t("sending") : t("sendReset")}
         </button>
         <p className="text-center text-xs">
-          <Link href="/login" className="font-semibold text-emerald-700 hover:underline">
-            ← Back to login
+          <Link
+            href="/login"
+            className="font-semibold text-emerald-700 hover:underline"
+          >
+            {t("backToLogin")}
           </Link>
         </p>
       </form>

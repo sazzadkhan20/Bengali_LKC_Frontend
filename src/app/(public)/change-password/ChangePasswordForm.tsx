@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useI18n } from "@/lib/i18n";
 
 /**
  * Two-step password change (SRS §3.2):
@@ -16,6 +17,7 @@ export function ChangePasswordForm({
   minLength: number;
   firstLogin: boolean;
 }) {
+  const { t } = useI18n();
   const router = useRouter();
   const [step, setStep] = useState<1 | 2>(1);
   const [current, setCurrent] = useState("");
@@ -56,11 +58,11 @@ export function ChangePasswordForm({
   async function submit() {
     setError(null);
     if (next !== confirm) {
-      setError("New password and confirmation do not match.");
+      setError(t("passwordsMismatch"));
       return;
     }
     if (next.trim().length < minLength) {
-      setError(`New password must be at least ${minLength} characters.`);
+      setError(t("passwordTooShort").replace("{n}", String(minLength)));
       return;
     }
     setBusy(true);
@@ -69,7 +71,11 @@ export function ChangePasswordForm({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ currentPassword: current, otp, newPassword: next }),
+        body: JSON.stringify({
+          currentPassword: current,
+          otp,
+          newPassword: next,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -118,16 +124,19 @@ export function ChangePasswordForm({
       }}
     >
       <div className="flex items-center gap-4">
-        {stepBadge(1, "Verify identity")}
+        {stepBadge(1, t("stepVerifyIdentity"))}
         <span className="h-px flex-1 bg-slate-200" />
-        {stepBadge(2, "OTP + new password")}
+        {stepBadge(2, t("stepOtpNewPassword"))}
       </div>
 
       {step === 1 ? (
         <>
           <div>
-            <label htmlFor="current" className="mb-1.5 block text-sm font-semibold text-slate-700">
-              {firstLogin ? "One-time password" : "Current password"}
+            <label
+              htmlFor="current"
+              className="mb-1.5 block text-sm font-semibold text-slate-700"
+            >
+              {firstLogin ? t("oneTimePassword") : t("currentPassword")}
             </label>
             <input
               id="current"
@@ -137,10 +146,7 @@ export function ChangePasswordForm({
               autoComplete="current-password"
               className={field}
             />
-            <p className="mt-1 text-xs text-slate-400">
-              After verification, a one-time OTP code is sent to your
-              registered email address (2-step validation).
-            </p>
+            <p className="mt-1 text-xs text-slate-400">{t("otpAfterVerify")}</p>
           </div>
           {error ? (
             <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 ring-1 ring-rose-200">
@@ -152,27 +158,27 @@ export function ChangePasswordForm({
             disabled={busy || !current}
             className="w-full rounded-xl bg-emerald-700 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {busy ? "Sending OTP…" : "Verify & Send OTP to Email"}
+            {busy ? t("sendingOtp") : t("verifySendOtp")}
           </button>
         </>
       ) : (
         <>
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
             <p className="font-semibold text-emerald-800">
-              An OTP has been sent to {maskedEmail} (valid for {validMinutes}{" "}
-              minutes).
+              {t("otpSentTo")} {maskedEmail} ({t("validFor")} {validMinutes}{" "}
+              {t("minutes")}).
             </p>
-            <p className="mt-1 text-xs text-emerald-700">
-              Demo deployment shows the code here — in production it is
-              delivered exclusively by email:
-            </p>
+            <p className="mt-1 text-xs text-emerald-700">{t("demoOtpShows")}</p>
             <code className="mt-1 block w-fit rounded-lg bg-white px-3 py-1.5 font-mono text-base font-bold tracking-[0.3em] text-emerald-900 ring-1 ring-emerald-200">
               {demoOtp}
             </code>
           </div>
           <div>
-            <label htmlFor="otp" className="mb-1.5 block text-sm font-semibold text-slate-700">
-              OTP from your registered email
+            <label
+              htmlFor="otp"
+              className="mb-1.5 block text-sm font-semibold text-slate-700"
+            >
+              {t("otpFromEmail")}
             </label>
             <input
               id="otp"
@@ -186,8 +192,11 @@ export function ChangePasswordForm({
             />
           </div>
           <div>
-            <label htmlFor="next" className="mb-1.5 block text-sm font-semibold text-slate-700">
-              New password
+            <label
+              htmlFor="next"
+              className="mb-1.5 block text-sm font-semibold text-slate-700"
+            >
+              {t("newPassword")}
             </label>
             <input
               id="next"
@@ -198,12 +207,15 @@ export function ChangePasswordForm({
               className={field}
             />
             <p className="mt-1 text-xs text-slate-400">
-              Minimum {minLength} characters (configurable password policy, SRS §3.2).
+              {t("minChars").replace("{n}", String(minLength))}
             </p>
           </div>
           <div>
-            <label htmlFor="confirm" className="mb-1.5 block text-sm font-semibold text-slate-700">
-              Confirm new password
+            <label
+              htmlFor="confirm"
+              className="mb-1.5 block text-sm font-semibold text-slate-700"
+            >
+              {t("confirmNewPassword")}
             </label>
             <input
               id="confirm"
@@ -224,7 +236,7 @@ export function ChangePasswordForm({
             disabled={busy || otp.length !== 6 || !next || !confirm}
             className="w-full rounded-xl bg-emerald-700 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {busy ? "Saving…" : "Set New Password"}
+            {busy ? t("saving") : t("setNewPasswordBtn")}
           </button>
           <button
             type="button"
@@ -232,7 +244,7 @@ export function ChangePasswordForm({
             disabled={busy}
             className="w-full text-center text-xs font-semibold text-slate-400 transition hover:text-emerald-700 disabled:opacity-50"
           >
-            Didn&apos;t receive the code? Resend OTP
+            {t("resendOtp")}
           </button>
         </>
       )}

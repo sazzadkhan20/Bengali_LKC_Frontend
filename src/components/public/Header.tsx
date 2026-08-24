@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useI18n } from "@/lib/i18n";
-import { ROLE_LABEL } from "@/lib/format";
 import type { Session } from "@/lib/types";
 
 export function PublicHeader({ session }: { session: Session | null }) {
@@ -23,6 +22,7 @@ export function PublicHeader({ session }: { session: Session | null }) {
   const nav = [
     { href: "/dictionary", label: t("dictionary") },
     { href: "/search", label: t("search") },
+    { href: "/contribute", label: t("contribute") },
     { href: "/about", label: t("about") },
   ];
 
@@ -76,7 +76,7 @@ export function PublicHeader({ session }: { session: Session | null }) {
               {t("appName")}
             </span>
             <span className="hidden text-[10px] font-medium uppercase tracking-wider text-slate-400 sm:block">
-              Local Knowledge Core
+              {t("localKnowledgeCore")}
             </span>
           </span>
         </Link>
@@ -122,7 +122,7 @@ export function PublicHeader({ session }: { session: Session | null }) {
                       {session.name}
                     </p>
                     <p className="text-xs text-slate-500">
-                      {ROLE_LABEL[session.role]}
+                      {t(`role_${session.role}`)}
                     </p>
                   </div>
                   <Link
@@ -156,7 +156,7 @@ export function PublicHeader({ session }: { session: Session | null }) {
             className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 md:hidden"
             aria-expanded={navOpen}
             aria-controls="mobile-nav"
-            aria-label={navOpen ? "Close menu" : "Open menu"}
+            aria-label={navOpen ? t("closeMenu") : t("openMenu")}
             onClick={() => setNavOpen((v) => !v)}
           >
             <span className="text-lg leading-none" aria-hidden>
@@ -174,7 +174,7 @@ export function PublicHeader({ session }: { session: Session | null }) {
           <div className="mx-auto flex max-w-7xl flex-col gap-1 px-4 py-3 sm:px-6">
             <div className="mb-2 flex items-center justify-between sm:hidden">
               <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Language
+                {t("language")}
               </span>
               {langToggle}
             </div>

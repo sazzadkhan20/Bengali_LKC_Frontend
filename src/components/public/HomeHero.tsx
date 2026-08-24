@@ -29,7 +29,7 @@ export function HomeHero() {
 
       <div className="relative mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-20 md:py-28">
         <p className="font-bengali text-base font-medium text-emerald-200 sm:text-lg">
-          বাংলা লোকাল নলেজ কোর
+          {t("heroBrandBn")}
         </p>
         <h1 className="mt-3 max-w-3xl text-[clamp(1.75rem,5vw,3.25rem)] font-extrabold leading-[1.15] tracking-tight">
           {t("heroTitle")}
@@ -48,6 +48,12 @@ export function HomeHero() {
             className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-400/40 bg-emerald-600/30 px-5 py-2.5 text-center font-semibold text-white backdrop-blur transition hover:bg-emerald-600/50"
           >
             {t("browseDictionary")} →
+          </Link>
+          <Link
+            href="/contribute"
+            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-white px-5 py-2.5 text-center font-semibold text-emerald-900 shadow-sm transition hover:bg-emerald-50"
+          >
+            {t("mailToContribute")}
           </Link>
           <Link
             href="/login"

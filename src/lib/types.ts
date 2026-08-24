@@ -322,3 +322,16 @@ export interface ExportRecord {
   sha256: string;
   config: string;
 }
+
+/** Interest form from visitors who want to join Ben-LKC (Apply to Contribute). */
+export interface ContributeApplication {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  institution?: string;
+  interestRole?: string;
+  message: string;
+  createdAt: string;
+  status: "NEW" | "REVIEWED";
+}

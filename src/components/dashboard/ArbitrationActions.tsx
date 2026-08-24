@@ -57,7 +57,6 @@ export function VotePanel({
     ...(hasAccusedVersion
       ? [{ value: "APPROVE_ACCUSED" as Verdict, label: "Approve accused's version", desc: "The counter-claimed version is accepted." }]
       : []),
-    { value: "REJECT", label: "Reject (uphold previous decision)", desc: "The original rejection/flag stands. No further appeals." },
   ];
 
   return (
@@ -67,7 +66,7 @@ export function VotePanel({
           {error}
         </p>
       ) : null}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className={`grid gap-3 ${hasAccusedVersion ? "sm:grid-cols-2" : "sm:grid-cols-1"}`}>
         {options.map((o) => (
           <button
             key={o.value}
@@ -91,7 +90,7 @@ export function VotePanel({
         placeholder="Mandatory rationale (minimum 30 characters)…"
         className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
       />
-      {verdict && verdict !== "REJECT" ? (
+      {verdict ? (
         <input
           value={correction}
           onChange={(e) => setCorrection(e.target.value)}

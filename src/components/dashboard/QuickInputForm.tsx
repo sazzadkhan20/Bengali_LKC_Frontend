@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ILI_NOT_AVAILABLE, isIliNotAvailable } from "@/lib/ili";
 import type { Role } from "@/lib/types";
 import { IliFinder } from "@/components/dashboard/IliFinder";
 
@@ -201,7 +202,12 @@ export function QuickInputForm({ role }: { role: Role }) {
           pos,
           synsetAction,
           synsetId: synsetAction === "link" ? selectedSynset?.id : undefined,
-          iliCode: synsetAction === "create" ? ili.trim() : undefined,
+          iliCode:
+            synsetAction === "create"
+              ? isIliNotAvailable(ili)
+                ? ILI_NOT_AVAILABLE
+                : ili.trim()
+              : undefined,
           definitionLanguage: defLang,
           definitionText: lockedDefinition ? undefined : defText.trim() || undefined,
           senseRelations: senseRels
@@ -364,7 +370,7 @@ export function QuickInputForm({ role }: { role: Role }) {
           {(
             [
               ["link", "Link to existing synset"],
-              ["create", "Create new synset (requires ILI code)"],
+              ["create", "Create new synset (ILI code or N/A)"],
             ] as const
           ).map(([val, label]) => (
             <label key={val} className="flex items-center gap-2 text-sm font-medium text-slate-700">
@@ -430,7 +436,50 @@ export function QuickInputForm({ role }: { role: Role }) {
               <label className="mb-1.5 block text-sm font-semibold text-slate-700">
                 ILI code <span className="text-rose-500">*</span>
               </label>
-              {iliPicked && ili ? (
+
+              <label className="mb-3 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 transition hover:border-emerald-300">
+                <input
+                  type="checkbox"
+                  checked={isIliNotAvailable(ili)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setIli(ILI_NOT_AVAILABLE);
+                      setIliPicked(true);
+                    } else {
+                      setIli("");
+                      setIliPicked(false);
+                    }
+                  }}
+                  className="mt-0.5 h-4 w-4 accent-emerald-700"
+                />
+                <span>
+                  <span className="font-semibold text-slate-800">
+                    N/A — ILI not available
+                  </span>
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    Select when no Princeton WordNet 2.1 concept applies yet.
+                    Editors can attach an ILI later if one is found.
+                  </span>
+                </span>
+              </label>
+
+              {isIliNotAvailable(ili) ? (
+                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5">
+                  <code className="min-w-0 flex-1 font-mono text-sm font-bold text-amber-900">
+                    {ILI_NOT_AVAILABLE}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIli("");
+                      setIliPicked(false);
+                    }}
+                    className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-rose-700 ring-1 ring-inset ring-rose-200 transition hover:bg-rose-50"
+                  >
+                    Clear N/A
+                  </button>
+                </div>
+              ) : iliPicked && ili ? (
                 <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2.5">
                   <code className="min-w-0 flex-1 font-mono text-sm font-bold text-emerald-900">
                     {ili}
@@ -453,20 +502,22 @@ export function QuickInputForm({ role }: { role: Role }) {
                     setIli(e.target.value);
                     setIliPicked(false);
                   }}
-                  placeholder="ILI code, e.g. 04192858-n — or pick one below"
+                  placeholder="ILI code, e.g. 04192858-n — or pick one below / select N/A"
                   className="w-full rounded-xl border border-slate-300 px-3 py-2.5 font-mono text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
                 />
               )}
               <p className="mt-1 text-[11px] text-slate-400">
-                Format: {`{8-digit-zero-padded-offset}-{n|v|a|r}`} — must exist
-                in the Princeton WordNet 2.1 registry
-                {iliPicked
-                  ? ". Discard to choose a different code."
-                  : ". Use the finder below if you do not know the code."}
+                {isIliNotAvailable(ili)
+                  ? "This entry will be created without a WordNet ILI link."
+                  : `Format: {8-digit-zero-padded-offset}-{n|v|a|r} — must exist in the Princeton WordNet 2.1 registry${
+                      iliPicked
+                        ? ". Discard to choose a different code."
+                        : ". Use the finder below if you do not know the code, or select N/A above."
+                    }`}
               </p>
               {fieldError("iliCode")}
             </div>
-            {!iliPicked ? (
+            {!iliPicked && !isIliNotAvailable(ili) ? (
               <IliFinder
                 compact
                 initialPos={pos}

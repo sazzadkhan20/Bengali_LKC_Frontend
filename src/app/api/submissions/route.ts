@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession, hasPermission } from "@/lib/auth";
+import { isIliNotAvailable, normalizeIliCode } from "@/lib/ili";
 import { isKnownIli, synsetById } from "@/lib/lexicon";
 import { isValidWn21Ili } from "@/lib/wordnet21";
 import { recordAudit, store, transitionSubmission } from "@/lib/store";
@@ -92,10 +93,12 @@ export async function POST(req: Request) {
     else if (syn.pos !== p.pos)
       errors.synsetId = `POS mismatch: selected synset is "${syn.pos}" but the lemma is "${p.pos}".`;
   } else if (p.synsetAction === "create") {
-    const ili = (p.iliCode ?? "").trim();
-    if (!/^\d{8}-[nvar]$/.test(ili))
+    const ili = normalizeIliCode(p.iliCode);
+    if (isIliNotAvailable(ili)) {
+      // Allowed: contributor explicitly marks ILI as not available.
+    } else if (!/^\d{8}-[nvar]$/.test(ili))
       errors.iliCode =
-        "ILI code must follow the format {8-digit-offset}-{n|v|a|r}, e.g. 04192858-n.";
+        "ILI code must follow the format {8-digit-offset}-{n|v|a|r}, e.g. 04192858-n — or select N/A.";
     else if (!ili.endsWith(p.pos ?? ""))
       errors.iliCode = "ILI code POS suffix must match the selected part of speech.";
     else if (!isValidWn21Ili(ili))
@@ -135,14 +138,14 @@ export async function POST(req: Request) {
   const targetIli =
     p.synsetAction === "link"
       ? synsetById.get(p.synsetId!)?.ili
-      : p.iliCode;
+      : normalizeIliCode(p.iliCode);
   const exact = store.submissions.find(
     (s) =>
       s.writtenForm === word &&
       s.pos === p.pos &&
       (s.synsetAction === "link"
         ? synsetById.get(s.synsetId ?? "")?.ili
-        : s.iliCode) === targetIli &&
+        : normalizeIliCode(s.iliCode)) === targetIli &&
       s.state !== "REJECTED"
   );
   if (exact) {
@@ -179,7 +182,8 @@ export async function POST(req: Request) {
     pos: p.pos as Submission["pos"],
     synsetAction: p.synsetAction!,
     synsetId: p.synsetAction === "link" ? p.synsetId : undefined,
-    iliCode: p.synsetAction === "create" ? p.iliCode?.trim() : undefined,
+    iliCode:
+      p.synsetAction === "create" ? normalizeIliCode(p.iliCode) : undefined,
     definitionLanguage: p.definitionText ? (p.definitionLanguage ?? "ben") : undefined,
     definitionText: p.definitionText?.trim() || undefined,
     senseRelations: p.senseRelations ?? [],

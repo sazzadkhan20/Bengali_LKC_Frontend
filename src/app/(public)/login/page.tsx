@@ -3,18 +3,20 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useI18n } from "@/lib/i18n";
 
 const DEMO_CREDENTIALS = [
-  { username: "architect", password: "architect2026", role: "Platform Architect", desc: "Full system governance" },
-  { username: "moderator", password: "moderator2026", role: "System Moderator", desc: "Queue governance, tie-breaks" },
-  { username: "contributor", password: "contributor2026", role: "Lexical Contributor", desc: "Quick Input data entry" },
-  { username: "editor", password: "editor2026", role: "Lexical Editor", desc: "Primary validation" },
-  { username: "chief", password: "chief2026", role: "Chief Lexical Editor", desc: "Final linguistic validation" },
-  { username: "curator", password: "curator2026", role: "Arbitration Curator", desc: "Panel dispute voting" },
-  { username: "mita.c", password: "welcome-mita-2026", role: "Lexical Contributor", desc: "One-time password — first-login change demo" },
+  { username: "architect", password: "architect2026", roleKey: "role_PLATFORM_ARCHITECT" as const, descEn: "Full system governance", descBn: "পূর্ণ সিস্টেম পরিচালনা" },
+  { username: "moderator", password: "moderator2026", roleKey: "role_SYSTEM_MODERATOR" as const, descEn: "Queue governance, tie-breaks", descBn: "সারি পরিচালনা, টাই-ব্রেক" },
+  { username: "contributor", password: "contributor2026", roleKey: "role_CONTRIBUTOR" as const, descEn: "Quick Input data entry", descBn: "Quick Input তথ্য এন্ট্রি" },
+  { username: "editor", password: "editor2026", roleKey: "role_LEXICAL_EDITOR" as const, descEn: "Primary validation", descBn: "প্রাথমিক যাচাই" },
+  { username: "chief", password: "chief2026", roleKey: "role_CHIEF_LEXICAL_EDITOR" as const, descEn: "Final linguistic validation", descBn: "চূড়ান্ত ভাষাতাত্ত্বিক যাচাই" },
+  { username: "curator", password: "curator2026", roleKey: "role_ARBITRATION_CURATOR" as const, descEn: "Panel dispute voting", descBn: "প্যানেল বিরোধ ভোট" },
+  { username: "mita.c", password: "welcome-mita-2026", roleKey: "role_CONTRIBUTOR" as const, descEn: "One-time password — first-login change demo", descBn: "একবার ব্যবহারযোগ্য পাসওয়ার্ড — প্রথম-লগইন পরিবর্তন ডেমো" },
 ];
 
 export default function LoginPage() {
+  const { t, lang } = useI18n();
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -64,19 +66,13 @@ export default function LoginPage() {
     <div className="mx-auto grid max-w-5xl gap-8 px-4 py-10 sm:gap-10 sm:px-6 sm:py-16 lg:grid-cols-2">
       <div>
         <h1 className="text-[clamp(1.5rem,4vw,1.875rem)] font-bold tracking-tight text-slate-900">
-          Sign in with your credentials
+          {t("signInTitle")}
         </h1>
         <p className="mt-3 text-sm leading-relaxed text-slate-500">
-          Access to the Bengali LKC platform is credential-based (SRS §3.2).
-          Your username and one-time password are issued exclusively by the
-          Platform Architect and delivered to your registered email address.
-          The one-time password must be changed at first login. If you
-          don&apos;t have a credential, contact the project team.
+          {t("signInIntro")}
         </p>
         <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 ring-1 ring-amber-200">
-          On Hugging Face Spaces, use the <strong>Open in full tab</strong> link
-          at the top of the page before signing in — embedded previews block
-          session cookies in most browsers.
+          {t("hfSpacesNote")}
         </p>
 
         <form
@@ -91,7 +87,7 @@ export default function LoginPage() {
               htmlFor="username"
               className="mb-1.5 block text-sm font-semibold text-slate-700"
             >
-              Username
+              {t("username")}
             </label>
             <input
               id="username"
@@ -107,7 +103,7 @@ export default function LoginPage() {
               htmlFor="password"
               className="mb-1.5 block text-sm font-semibold text-slate-700"
             >
-              Password
+              {t("password")}
             </label>
             <input
               id="password"
@@ -129,32 +125,29 @@ export default function LoginPage() {
             disabled={busy || !username.trim() || !password}
             className="w-full rounded-xl bg-emerald-700 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {busy ? "Signing in…" : "Sign in"}
+            {busy ? t("signingIn") : t("signIn")}
           </button>
           <p className="text-center text-xs">
             <Link
               href="/forgot-password"
               className="font-semibold text-emerald-700 hover:underline"
             >
-              Forgot your password?
+              {t("forgotYourPassword")}
             </Link>
           </p>
         </form>
 
         <p className="mt-6 text-xs leading-relaxed text-slate-400">
-          Sessions expire after 60 minutes of inactivity. Credential issuance,
-          password resets and first-login password changes are recorded in
-          the tamper-evident audit trail.
+          {t("sessionNote")}
         </p>
       </div>
 
       <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <h2 className="text-sm font-bold text-slate-800">
-          Demonstration credentials
+          {t("demoCredentials")}
         </h2>
         <p className="mt-1 text-xs text-slate-500">
-          This is a demo deployment — click any credential to explore that
-          role&apos;s dashboard and permissions.
+          {t("demoCredentialsHint")}
         </p>
         <ul className="mt-4 divide-y divide-slate-100">
           {DEMO_CREDENTIALS.map((d) => (
@@ -170,10 +163,10 @@ export default function LoginPage() {
                 </code>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold text-slate-800">
-                    {d.role}
+                    {t(d.roleKey)}
                   </span>
                   <span className="block truncate text-xs text-slate-400">
-                    {d.desc}
+                    {lang === "bn" ? d.descBn : d.descEn}
                   </span>
                 </span>
                 <span className="ml-auto shrink-0 text-slate-300 transition group-hover:text-emerald-600">

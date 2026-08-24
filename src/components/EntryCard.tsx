@@ -1,9 +1,13 @@
+"use client";
+
 import Link from "next/link";
 import type { LexicalEntry } from "@/lib/types";
 import { entriesBySynset, senseById, synsetById } from "@/lib/lexicon";
 import { REL_LABEL } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 import { WordLink } from "@/components/WordLink";
-import { IdChip, LangBadge, PosBadge } from "./ui";
+import { LocalizedPosBadge } from "@/components/LocalizedPosBadge";
+import { IdChip, LangBadge } from "./ui";
 
 /**
  * Dictionary entry card (SRS §8.1.2). When `showIds` is false (Visitor
@@ -22,6 +26,7 @@ export function EntryCard({
   /** True on `/word/[id]` — hides the redundant self-link control. */
   detailPage?: boolean;
 }) {
+  const { t } = useI18n();
   const firstSynset = entry.senses[0]
     ? synsetById.get(entry.senses[0].synset)
     : undefined;
@@ -50,16 +55,16 @@ export function EntryCard({
           {entry.lemma}
         </WordLink>
       )}
-      <PosBadge pos={entry.pos} />
+      <LocalizedPosBadge pos={entry.pos} />
       {showIds ? <IdChip id={entry.id} /> : null}
       {entry.senses.length > 1 ? (
         <span className="text-xs font-medium text-slate-400">
-          {entry.senses.length} senses (polysemous)
+          {entry.senses.length} {t("sensesPolysemous")}
         </span>
       ) : null}
       {!detailPage ? (
         <span className="w-full text-xs font-semibold text-emerald-700 group-hover:underline sm:ml-auto sm:w-auto">
-          Show Details →
+          {t("showDetails")}
         </span>
       ) : null}
     </header>
@@ -79,7 +84,7 @@ export function EntryCard({
             >
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                 <span className="font-semibold text-slate-600">
-                  Sense {idx + 1}
+                  {t("senseN")} {idx + 1}
                 </span>
                 {showIds ? (
                   <>
@@ -104,13 +109,13 @@ export function EntryCard({
                 </p>
               ) : (
                 <p className="mt-2 text-xs italic text-slate-400">
-                  No definition recorded for this concept yet.
+                  {t("noDefinitionYet")}
                 </p>
               )}
 
               {synonyms.length > 0 ? (
                 <p className="mt-2 text-xs text-slate-500">
-                  <span className="font-semibold">Synonyms:</span>{" "}
+                  <span className="font-semibold">{t("synonyms")}:</span>{" "}
                   {synonyms.slice(0, 8).map((s, i) => (
                     <span key={s.id}>
                       {i > 0 ? ", " : ""}
@@ -122,14 +127,16 @@ export function EntryCard({
                       </WordLink>
                     </span>
                   ))}
-                  {synonyms.length > 8 ? ` +${synonyms.length - 8} more` : ""}
+                  {synonyms.length > 8
+                    ? ` +${synonyms.length - 8} ${t("more")}`
+                    : ""}
                 </p>
               ) : null}
 
               {!compact && sense.relations && sense.relations.length > 0 ? (
                 <div className="mt-3 border-t border-slate-100 pt-2">
                   <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
-                    Sense relations
+                    {t("senseRelations")}
                   </p>
                   <ul className="mt-1 space-y-1">
                     {sense.relations.map((rel, i) => {
@@ -151,7 +158,7 @@ export function EntryCard({
                             </WordLink>
                           ) : (
                             <span className="italic text-slate-400">
-                              external sense
+                              {t("externalSense")}
                             </span>
                           )}
                           {showIds ? <IdChip id={rel.target} /> : null}
@@ -165,7 +172,7 @@ export function EntryCard({
               {!compact && synset?.relations && synset.relations.length > 0 ? (
                 <div className="mt-3 border-t border-slate-100 pt-2">
                   <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
-                    Synset relations
+                    {t("synsetRelations")}
                   </p>
                   <ul className="mt-1 space-y-1">
                     {synset.relations.map((rel, i) => {
