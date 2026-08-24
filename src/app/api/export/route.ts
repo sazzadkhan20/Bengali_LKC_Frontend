@@ -36,6 +36,15 @@ export async function GET(req: Request) {
   ) as POS[];
   const includeCanonical = searchParams.get("canonical") !== "0";
   const includeLkcSource = searchParams.get("lkcSource") === "1";
+  const mode =
+    searchParams.get("mode") === "new"
+      ? "new"
+      : searchParams.get("mode") === "all"
+        ? "all"
+        : includeCanonical
+          ? "all"
+          : "new";
+  const exportCanonical = mode === "all";
 
   const posOk = (p: POS) => posFilter.length === 0 || posFilter.includes(p);
 
@@ -43,17 +52,17 @@ export async function GET(req: Request) {
   const validatedSubs = store.submissions.filter(
     (s) => s.state === "VALIDATED" && posOk(s.pos)
   );
-  const canonicalEntries = includeCanonical
+  const canonicalEntries = exportCanonical
     ? allEntries.filter((e) => posOk(e.pos))
     : [];
 
-  // New synsets implied by "create" submissions
+  // New synsets implied by "create" submissions (including ILI = N/A)
   let nextSynNum = 2100000;
   let nextSenNum = 3300000;
   let nextWordNum = 2300000;
   const newSynsetBySub = new Map<string, string>();
   for (const s of validatedSubs) {
-    if (s.synsetAction === "create" && s.iliCode) {
+    if (s.synsetAction === "create") {
       newSynsetBySub.set(s.id, `ben-syn${nextSynNum++}`);
     }
   }
@@ -79,7 +88,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       dryRun: true,
       projected: stats,
-      config: { version, posFilter, includeCanonical, includeLkcSource },
+      config: { version, posFilter, mode, includeLkcSource },
     });
   }
 
@@ -166,7 +175,7 @@ export async function GET(req: Request) {
     const newId = newSynsetBySub.get(s.id);
     if (!newId) continue;
     lines.push(
-      `    <Synset id="${newId}" ili="${s.iliCode}" partOfSpeech="${s.pos}" lexicalized="true">`
+      `    <Synset id="${newId}" ili="${esc(s.iliCode ?? "N/A")}" partOfSpeech="${s.pos}" lexicalized="true">`
     );
     if (s.definitionText) {
       lines.push(
@@ -195,7 +204,7 @@ export async function GET(req: Request) {
     entryCount: stats.entries,
     synsetCount: stats.synsets,
     sha256,
-    config: `version=${version}; pos=${posFilter.join("/") || "all"}; canonical=${includeCanonical}`,
+    config: `mode=${mode}; version=${version}; pos=${posFilter.join("/") || "all"}`,
   };
   store.exports.push(record);
   recordAudit({

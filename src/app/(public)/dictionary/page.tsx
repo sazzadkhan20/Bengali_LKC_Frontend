@@ -6,10 +6,14 @@ import {
   entriesByLetter,
   lexiconStats,
 } from "@/lib/lexicon";
-import { formatNumber, POS_LABEL } from "@/lib/format";
+import { formatNumber } from "@/lib/format";
 import { EntryCard } from "@/components/EntryCard";
-import { EmptyState, PageTitle, Pagination } from "@/components/ui";
-import type { POS } from "@/lib/types";
+import { DictionaryPageTitle } from "@/components/public/DictionaryPageTitle";
+import {
+  DictionaryEmpty,
+  DictionaryLetterMeta,
+} from "@/components/public/DictionaryChrome";
+import { Pagination } from "@/components/ui";
 
 export const metadata: Metadata = { title: "Dictionary Browse" };
 
@@ -36,10 +40,7 @@ export default async function DictionaryPage({
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
-      <PageTitle
-        title="Dictionary Browse"
-        subtitle="Alphabetical browse of all validated entries, ordered by the Bengali Varnamala. Click any initial character to jump to that section."
-      />
+      <DictionaryPageTitle />
 
       {/* Statistics panel — authenticated roles only (SRS §8.1.1) */}
       {showIds ? (
@@ -100,23 +101,15 @@ export default async function DictionaryPage({
         </div>
       </nav>
 
-      <div className="mb-4 flex items-baseline justify-between">
-        <p className="text-sm text-slate-500">
-          <span className="font-bengali text-xl font-bold text-slate-800">
-            {letter}
-          </span>{" "}
-          — {formatNumber(all.length)} entries · page {page} of {totalPages}
-        </p>
-        <p className="hidden text-xs text-slate-400 sm:block">
-          POS legend: {(["n", "v", "a", "r"] as POS[]).map((p) => POS_LABEL[p]).join(" · ")}
-        </p>
-      </div>
+      <DictionaryLetterMeta
+        letter={letter}
+        count={all.length}
+        page={page}
+        totalPages={totalPages}
+      />
 
       {items.length === 0 ? (
-        <EmptyState
-          title="No entries under this letter"
-          message="Try another character from the index bar above."
-        />
+        <DictionaryEmpty />
       ) : (
         <div className="space-y-4">
           {items.map((entry) => (

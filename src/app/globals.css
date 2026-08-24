@@ -120,6 +120,19 @@ canvas {
   overflow-wrap: anywhere;
 }
 
+/* UI language = বাং: prefer Noto Bengali for mixed Bengali/Latin chrome */
+body.lang-bn {
+  font-family: var(--font-noto-bengali), var(--font-geist-sans), sans-serif;
+  line-height: 1.65;
+}
+body.lang-bn code,
+body.lang-bn kbd,
+body.lang-bn samp,
+body.lang-bn .font-mono {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  line-height: 1.4;
+}
+
 /* Shared content shell used across public + dashboard pages */
 .page-shell {
   width: 100%;

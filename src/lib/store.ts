@@ -15,6 +15,7 @@ import type {
   ArbitrationCase,
   AuditEvent,
   CommunityPost,
+  ContributeApplication,
   Credential,
   EntryState,
   ExportRecord,
@@ -133,6 +134,7 @@ export interface StoreShape {
   posts: CommunityPost[];
   audit: AuditEvent[];
   exports: ExportRecord[];
+  contributeApplications: ContributeApplication[];
   config: SystemConfig;
   counters: {
     submission: number;
@@ -142,6 +144,7 @@ export interface StoreShape {
     credential: number;
     post: number;
     reply: number;
+    contribute: number;
   };
 }
 
@@ -379,6 +382,7 @@ function buildStore(): StoreShape {
         config: "All POS, full validated set, version 1.1-draft",
       },
     ],
+    contributeApplications: [],
     config: {
       maxEntriesPerSession: 50,
       maxEntriesPerDay: 200,
@@ -404,6 +408,7 @@ function buildStore(): StoreShape {
       credential: SEED_CREDENTIALS.length + 1,
       post: posts.length + 1,
       reply: 4,
+      contribute: 1,
     },
   };
 }

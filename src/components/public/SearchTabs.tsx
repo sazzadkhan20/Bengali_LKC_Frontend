@@ -3,17 +3,19 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import { useI18n } from "@/lib/i18n";
 
 function Tabs({ authenticated }: { authenticated: boolean }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { t } = useI18n();
   const q = searchParams.get("q");
 
   const tabs = [
-    { href: "/search", label: "Word", public: true },
-    { href: "/search/gloss", label: "Gloss", public: true },
-    { href: "/search/synset", label: "Synset / ILI", public: false },
-    { href: "/search/sense", label: "Sense ID", public: false },
+    { href: "/search", label: t("tabWord"), public: true },
+    { href: "/search/gloss", label: t("tabGloss"), public: true },
+    { href: "/search/synset", label: t("tabSynsetIli"), public: false },
+    { href: "/search/sense", label: t("tabSenseId"), public: false },
   ];
 
   return (
