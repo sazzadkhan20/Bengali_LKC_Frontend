@@ -42,24 +42,12 @@ export function HomeHero() {
           <SearchBox large />
         </div>
 
-        <div className="mt-6 flex flex-col gap-3 text-sm sm:mt-8 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+        <div className="mt-6 sm:mt-8">
           <Link
             href="/dictionary"
-            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-400/40 bg-emerald-600/30 px-5 py-2.5 text-center font-semibold text-white backdrop-blur transition hover:bg-emerald-600/50"
+            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-400/40 bg-emerald-600/30 px-5 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:bg-emerald-600/50"
           >
             {t("browseDictionary")} →
-          </Link>
-          <Link
-            href="/contribute"
-            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-white px-5 py-2.5 text-center font-semibold text-emerald-900 shadow-sm transition hover:bg-emerald-50"
-          >
-            {t("mailToContribute")}
-          </Link>
-          <Link
-            href="/login"
-            className="inline-flex min-h-11 items-center justify-center rounded-xl px-3 py-2.5 text-center font-semibold text-emerald-200 underline-offset-4 transition hover:text-white hover:underline"
-          >
-            {t("becomeContributor")}
           </Link>
         </div>
       </div>
