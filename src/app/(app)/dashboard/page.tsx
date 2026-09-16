@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth";
+import { getSession, getSessionPayload } from "@/lib/auth";
 import { ROLE_LABEL } from "@/lib/format";
 import { PageTitle } from "@/components/ui";
 import {
@@ -21,6 +21,8 @@ export const metadata: Metadata = { title: "Dashboard" };
 export default async function DashboardPage() {
   const session = await getSession();
   if (!session) redirect("/login");
+  const payload = await getSessionPayload();
+  const displayName = payload?.profile.name ?? session.name;
 
   const body = (() => {
     switch (session.role) {
@@ -43,7 +45,7 @@ export default async function DashboardPage() {
     <div className="mx-auto max-w-7xl">
       <PageTitle
         title={`${ROLE_LABEL[session.role]} Dashboard`}
-        subtitle={`Welcome back, ${session.name}.`}
+        subtitle={`Welcome back, ${displayName}.`}
       />
       {body}
     </div>

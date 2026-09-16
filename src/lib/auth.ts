@@ -1,45 +1,23 @@
 import "server-only";
 import { cookies } from "next/headers";
-import type { Role, Session } from "./types";
-import { credentialForUser, store } from "./store";
+import type { Role, Session, User } from "./types";
+import { backendFetch } from "./backend";
+import { ACCESS_COOKIE, REFRESH_COOKIE } from "./auth-cookies";
 
-export const SESSION_COOKIE = "lkc_session";
+export const SESSION_COOKIE = ACCESS_COOKIE;
 
-/** Resolve the current session from the signed demo cookie. */
-export async function getSession(): Promise<Session | null> {
-  const jar = await cookies();
-  const raw = jar.get(SESSION_COOKIE)?.value;
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(
-      Buffer.from(raw, "base64url").toString("utf8")
-    ) as Session;
-    const user = store.users.find((u) => u.id === parsed.userId);
-    if (!user || !user.active || user.suspended) return null;
-    // Deactivating a credential immediately invalidates all sessions (SRS §3.2).
-    const credential = credentialForUser(user.id);
-    if (!credential || credential.deactivated) return null;
-    return {
-      userId: user.id,
-      username: user.username,
-      name: user.name,
-      role: user.role,
-      // Live flag: the one-time password must be replaced before the user
-      // can access any other part of the platform (SRS §3.2).
-      mustChangePassword: credential.oneTime || undefined,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function encodeSession(session: Session): string {
-  return Buffer.from(JSON.stringify(session), "utf8").toString("base64url");
-}
-
-/* ------------------------------------------------------------------ */
-/* Permission matrix (SRS §3.3)                                        */
-/* ------------------------------------------------------------------ */
+export type SessionPayload = {
+  ok: boolean;
+  session: Session & {
+    expiresAt?: string;
+    expiresInSeconds?: number;
+    sessionTimeoutMinutes?: number;
+  };
+  profile: User;
+  permissions: string[];
+  standing?: Record<string, unknown>;
+  mustChangePassword?: boolean;
+};
 
 export type Permission =
   | "manage_users"
@@ -103,7 +81,6 @@ const MATRIX: Record<Permission, Role[]> = {
     "ARBITRATION_CURATOR",
   ],
   dispute: ["CONTRIBUTOR"],
-  /* Author Community Board (SRS §14) — all authenticated authors */
   community: [
     "PLATFORM_ARCHITECT",
     "SYSTEM_MODERATOR",
@@ -113,7 +90,6 @@ const MATRIX: Record<Permission, Role[]> = {
     "ARBITRATION_CURATOR",
   ],
   community_moderate: ["SYSTEM_MODERATOR"],
-  /* Roles that earn reward points and are ranked (SRS §7.8) */
   leaderboard_ranked: ["CONTRIBUTOR", "LEXICAL_EDITOR", "CHIEF_LEXICAL_EDITOR"],
 };
 
@@ -123,4 +99,98 @@ export function hasPermission(
 ): boolean {
   if (!role) return false;
   return MATRIX[permission].includes(role);
+}
+
+function mapSession(raw: Record<string, unknown> | undefined): Session | null {
+  if (!raw || typeof raw.userId !== "string" || typeof raw.role !== "string") {
+    return null;
+  }
+  return {
+    userId: raw.userId,
+    username: String(raw.username ?? ""),
+    name: String(raw.name ?? ""),
+    role: raw.role as Role,
+    mustChangePassword: Boolean(raw.mustChangePassword) || undefined,
+  };
+}
+
+/**
+ * Resolve the current session via the backend session API (access JWT + optional refresh).
+ * Returns null when unauthenticated or when both tokens are invalid/expired.
+ */
+export async function getSession(): Promise<Session | null> {
+  const payload = await getSessionPayload();
+  return payload?.session ?? null;
+}
+
+/** Full session payload (profile, permissions, standing) for authenticated UI. */
+export async function getSessionPayload(): Promise<SessionPayload | null> {
+  try {
+    const jar = await cookies();
+    let access = jar.get(ACCESS_COOKIE)?.value ?? null;
+    const refresh = jar.get(REFRESH_COOKIE)?.value ?? null;
+    if (!access && !refresh) return null;
+
+    let result = access
+      ? await backendFetch<Record<string, unknown>>("/api/auth/session", {
+          method: "GET",
+          accessToken: access,
+        })
+      : { ok: false, status: 401, data: {} as Record<string, unknown> };
+
+    if ((!result.ok || result.status === 401) && refresh) {
+      const refreshed = await backendFetch<Record<string, unknown>>("/api/auth/refresh", {
+        method: "POST",
+        refreshToken: refresh,
+      });
+      if (refreshed.ok && typeof refreshed.data.accessToken === "string") {
+        access = refreshed.data.accessToken;
+        result = await backendFetch<Record<string, unknown>>("/api/auth/session", {
+          method: "GET",
+          accessToken: access,
+        });
+      }
+    }
+
+    if (!result.ok) return null;
+
+    const session = mapSession(result.data.session as Record<string, unknown> | undefined);
+    const profile = result.data.profile as User | undefined;
+    if (!session || !profile) return null;
+
+    return {
+      ok: true,
+      session: {
+        ...session,
+        expiresAt:
+          typeof (result.data.session as { expiresAt?: string })?.expiresAt === "string"
+            ? (result.data.session as { expiresAt: string }).expiresAt
+            : undefined,
+        expiresInSeconds:
+          typeof (result.data.session as { expiresInSeconds?: number })?.expiresInSeconds ===
+          "number"
+            ? (result.data.session as { expiresInSeconds: number }).expiresInSeconds
+            : undefined,
+        sessionTimeoutMinutes:
+          typeof (result.data.session as { sessionTimeoutMinutes?: number })
+            ?.sessionTimeoutMinutes === "number"
+            ? (result.data.session as { sessionTimeoutMinutes: number }).sessionTimeoutMinutes
+            : undefined,
+      },
+      profile,
+      permissions: Array.isArray(result.data.permissions)
+        ? (result.data.permissions as string[])
+        : [],
+      standing: result.data.standing as Record<string, unknown> | undefined,
+      mustChangePassword: Boolean(result.data.mustChangePassword),
+    };
+  } catch (err) {
+    console.error("[getSessionPayload]", err);
+    return null;
+  }
+}
+
+/** @deprecated Demo cookie encoder — kept for type compatibility; prefer backend JWT cookies. */
+export function encodeSession(session: Session): string {
+  return Buffer.from(JSON.stringify(session), "utf8").toString("base64url");
 }

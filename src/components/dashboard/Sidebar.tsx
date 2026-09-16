@@ -91,7 +91,7 @@ export function DashboardSidebar({ session }: { session: Session }) {
   const roleLabel = t(`role_${session.role}`);
 
   async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     router.push("/");
     router.refresh();
   }
