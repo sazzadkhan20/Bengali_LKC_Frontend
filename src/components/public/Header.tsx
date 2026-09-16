@@ -40,7 +40,7 @@ export function PublicHeader({ session }: { session: Session | null }) {
   }, [navOpen]);
 
   async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     router.push("/");
     router.refresh();
   }

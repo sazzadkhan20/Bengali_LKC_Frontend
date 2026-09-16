@@ -122,6 +122,10 @@ export interface Session {
   role: Role;
   /** Set when the one-time password has not been replaced yet (SRS §3.2). */
   mustChangePassword?: boolean;
+  /** ISO timestamp when the access token / session expires (backend). */
+  expiresAt?: string;
+  expiresInSeconds?: number;
+  sessionTimeoutMinutes?: number;
 }
 
 /* ------------------------------------------------------------------ */

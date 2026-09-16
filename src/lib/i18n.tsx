@@ -277,9 +277,13 @@ export const STRINGS = {
     en: "Sign in with your credentials",
     bn: "আপনার শংসাপত্র দিয়ে সাইন ইন করুন",
   },
+  sessionNote: {
+    en: "Your secure session lasts 1 hour. Access and refresh tokens are rotated automatically. Credential issuance, password resets and first-login password changes are recorded in the tamper-evident audit trail.",
+    bn: "আপনার সুরক্ষিত সেশন ১ ঘণ্টা স্থায়ী। অ্যাক্সেস ও রিফ্রেশ টোকেন স্বয়ংক্রিয়ভাবে রোটেট হয়। শংসাপত্র ইস্যু, পাসওয়ার্ড রিসেট ও প্রথম-লগইন পাসওয়ার্ড পরিবর্তন অডিট ট্রেইলে নথিভুক্ত হয়।",
+  },
   signInIntro: {
-    en: "Access to the Bengali LKC platform is credential-based. Your username and one-time password are issued by the Platform Architect. The one-time password must be changed at first login.",
-    bn: "বাংলা এলকেসি প্ল্যাটফর্মে প্রবেশ শংসাপত্রভিত্তিক। ব্যবহারকারী নাম ও একবার ব্যবহারযোগ্য পাসওয়ার্ড Platform Architect ইস্যু করেন। প্রথম লগইনে পাসওয়ার্ড পরিবর্তন করতে হয়।",
+    en: "Access to the Bengali LKC platform is credential-based. Sign in with the username and password issued by the Platform Architect. One-time passwords must be changed at first login.",
+    bn: "বাংলা এলকেসি প্ল্যাটফর্মে প্রবেশ শংসাপত্রভিত্তিক। Platform Architect ইস্যু করা ব্যবহারকারী নাম ও পাসওয়ার্ড দিয়ে সাইন ইন করুন। একবার ব্যবহারযোগ্য পাসওয়ার্ড প্রথম লগইনে পরিবর্তন করতে হয়।",
   },
   username: { en: "Username", bn: "ব্যবহারকারী নাম" },
   password: { en: "Password", bn: "পাসওয়ার্ড" },
@@ -451,10 +455,6 @@ export const STRINGS = {
   whyJoinPlaceholder: {
     en: "Tell us about your background with Bengali linguistics, lexicography, or related research, and how you would like to contribute…",
     bn: "বাংলা ভাষাবিজ্ঞান, অভিধানবিদ্যা বা সংশ্লিষ্ট গবেষণায় আপনার অভিজ্ঞতা এবং কীভাবে অবদান রাখতে চান লিখুন…",
-  },
-  sessionNote: {
-    en: "Sessions expire after 60 minutes of inactivity. Credential issuance, password resets and first-login password changes are recorded in the tamper-evident audit trail.",
-    bn: "৬০ মিনিট নিষ্ক্রিয় থাকলে সেশন শেষ হয়। শংসাপত্র ইস্যু, পাসওয়ার্ড রিসেট ও প্রথম-লগইন পাসওয়ার্ড পরিবর্তন অডিট ট্রেইলে নথিভুক্ত হয়।",
   },
   hfSpacesNote: {
     en: "On Hugging Face Spaces, use the Open in full tab link at the top of the page before signing in — embedded previews block session cookies in most browsers.",

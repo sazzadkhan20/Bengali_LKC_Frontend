@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Noto_Sans_Bengali } from "next/font/google";
 import { I18nProvider } from "@/lib/i18n";
+import { SessionProvider } from "@/lib/session-context";
+import { getSessionPayload } from "@/lib/auth";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -49,17 +51,30 @@ export const viewport: Viewport = {
   colorScheme: "light",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const payload = await getSessionPayload().catch(() => null);
+  const initial = payload
+    ? {
+        session: payload.session,
+        profile: payload.profile,
+        permissions: payload.permissions,
+        standing: payload.standing,
+        mustChangePassword: payload.mustChangePassword,
+      }
+    : null;
+
   return (
     <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${notoBengali.variable} font-sans antialiased`}
       >
-        <I18nProvider>{children}</I18nProvider>
+        <I18nProvider>
+          <SessionProvider initial={initial}>{children}</SessionProvider>
+        </I18nProvider>
       </body>
     </html>
   );

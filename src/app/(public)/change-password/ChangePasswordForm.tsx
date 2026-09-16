@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useI18n } from "@/lib/i18n";
+import { useOptionalAuthSession } from "@/lib/session-context";
 
 /**
  * Two-step password change (SRS §3.2):
@@ -19,6 +20,7 @@ export function ChangePasswordForm({
 }) {
   const { t } = useI18n();
   const router = useRouter();
+  const auth = useOptionalAuthSession();
   const [step, setStep] = useState<1 | 2>(1);
   const [current, setCurrent] = useState("");
   const [otp, setOtp] = useState("");
@@ -82,6 +84,7 @@ export function ChangePasswordForm({
         setError(data.error ?? "Password change failed.");
         return;
       }
+      await auth?.refresh();
       router.push("/dashboard");
       router.refresh();
     } finally {
