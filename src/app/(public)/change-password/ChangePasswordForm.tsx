@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { useOptionalAuthSession } from "@/lib/session-context";
+import { PasswordInput } from "@/components/ui/PasswordInput";
 
 /**
  * Two-step password change (SRS §3.2):
@@ -27,7 +28,6 @@ export function ChangePasswordForm({
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [maskedEmail, setMaskedEmail] = useState("");
-  const [demoOtp, setDemoOtp] = useState("");
   const [validMinutes, setValidMinutes] = useState(5);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -48,7 +48,6 @@ export function ChangePasswordForm({
         return;
       }
       setMaskedEmail(data.maskedEmail);
-      setDemoOtp(data.demoOtp);
       setValidMinutes(data.validMinutes ?? 5);
       setOtp("");
       setStep(2);
@@ -141,9 +140,8 @@ export function ChangePasswordForm({
             >
               {firstLogin ? t("oneTimePassword") : t("currentPassword")}
             </label>
-            <input
+            <PasswordInput
               id="current"
-              type="password"
               value={current}
               onChange={(e) => setCurrent(e.target.value)}
               autoComplete="current-password"
@@ -171,10 +169,9 @@ export function ChangePasswordForm({
               {t("otpSentTo")} {maskedEmail} ({t("validFor")} {validMinutes}{" "}
               {t("minutes")}).
             </p>
-            <p className="mt-1 text-xs text-emerald-700">{t("demoOtpShows")}</p>
-            <code className="mt-1 block w-fit rounded-lg bg-white px-3 py-1.5 font-mono text-base font-bold tracking-[0.3em] text-emerald-900 ring-1 ring-emerald-200">
-              {demoOtp}
-            </code>
+            <p className="mt-1 text-xs text-emerald-700">
+              Check your registered email inbox for the verification code.
+            </p>
           </div>
           <div>
             <label
@@ -201,9 +198,8 @@ export function ChangePasswordForm({
             >
               {t("newPassword")}
             </label>
-            <input
+            <PasswordInput
               id="next"
-              type="password"
               value={next}
               onChange={(e) => setNext(e.target.value)}
               autoComplete="new-password"
@@ -220,9 +216,8 @@ export function ChangePasswordForm({
             >
               {t("confirmNewPassword")}
             </label>
-            <input
+            <PasswordInput
               id="confirm"
-              type="password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               autoComplete="new-password"

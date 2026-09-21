@@ -12,7 +12,16 @@ export async function POST(req: Request) {
   };
   if (!username || typeof username !== "string" || !password || typeof password !== "string") {
     return NextResponse.json(
-      { error: "Username and password are required." },
+      {
+        errors: {
+          ...(!username || typeof username !== "string"
+            ? { username: "Enter your username or email address." }
+            : {}),
+          ...(!password || typeof password !== "string"
+            ? { password: "Enter your password." }
+            : {}),
+        },
+      },
       { status: 400 }
     );
   }
