@@ -282,8 +282,8 @@ export const STRINGS = {
     bn: "আপনার সুরক্ষিত সেশন ১ ঘণ্টা স্থায়ী। অ্যাক্সেস ও রিফ্রেশ টোকেন স্বয়ংক্রিয়ভাবে রোটেট হয়। শংসাপত্র ইস্যু, পাসওয়ার্ড রিসেট ও প্রথম-লগইন পাসওয়ার্ড পরিবর্তন অডিট ট্রেইলে নথিভুক্ত হয়।",
   },
   signInIntro: {
-    en: "Access to the Bengali LKC platform is credential-based. Sign in with the username and password issued by the Platform Architect. One-time passwords must be changed at first login.",
-    bn: "বাংলা এলকেসি প্ল্যাটফর্মে প্রবেশ শংসাপত্রভিত্তিক। Platform Architect ইস্যু করা ব্যবহারকারী নাম ও পাসওয়ার্ড দিয়ে সাইন ইন করুন। একবার ব্যবহারযোগ্য পাসওয়ার্ড প্রথম লগইনে পরিবর্তন করতে হয়।",
+    en: "Access to the Bengali LKC platform is credential-based. Sign in with your username or registered email, plus the password issued by the Platform Architect. One-time passwords must be changed at first login.",
+    bn: "বাংলা এলকেসি প্ল্যাটফর্মে প্রবেশ শংসাপত্রভিত্তিক। আপনার ব্যবহারকারী নাম অথবা নিবন্ধিত ইমেইল এবং Platform Architect ইস্যু করা পাসওয়ার্ড দিয়ে সাইন ইন করুন। একবার ব্যবহারযোগ্য পাসওয়ার্ড প্রথম লগইনে পরিবর্তন করতে হয়।",
   },
   username: { en: "Username", bn: "ব্যবহারকারী নাম" },
   password: { en: "Password", bn: "পাসওয়ার্ড" },
@@ -498,11 +498,27 @@ export const STRINGS = {
   prefix: { en: "prefix", bn: "আংশিক" },
   forgotTitle: { en: "Forgot your password?", bn: "পাসওয়ার্ড ভুলে গেছেন?" },
   forgotIntro: {
-    en: "Enter your username or registered email address. After email validation, a new one-time password will be sent to your registered address. You must change it at your next login.",
-    bn: "আপনার ব্যবহারকারী নাম বা নিবন্ধিত ইমেইল লিখুন। যাচাইয়ের পর নিবন্ধিত ঠিকানায় নতুন একবার ব্যবহারযোগ্য পাসওয়ার্ড পাঠানো হবে। পরবর্তী লগইনে তা পরিবর্তন করতে হবে।",
+    en: "Enter your username or registered email. We will send a one-time verification code (OTP) to your registered email. Enter that code with a new password to reset access. You can then sign in with username or email.",
+    bn: "আপনার ব্যবহারকারী নাম বা নিবন্ধিত ইমেইল লিখুন। নিবন্ধিত ইমেইলে একবার ব্যবহারযোগ্য যাচাই কোড (OTP) পাঠানো হবে। সেই কোড ও নতুন পাসওয়ার্ড দিয়ে অ্যাক্সেস রিসেট করুন। এরপর ব্যবহারকারী নাম বা ইমেইল দিয়ে সাইন ইন করতে পারবেন।",
   },
   usernameOrEmail: { en: "Username or email", bn: "ব্যবহারকারী নাম বা ইমেইল" },
   sendReset: { en: "Send Reset Email", bn: "রিসেট ইমেইল পাঠান" },
+  sendResetOtp: {
+    en: "Send OTP to Email",
+    bn: "ইমেইলে OTP পাঠান",
+  },
+  forgotStepRequestOtp: {
+    en: "Request OTP",
+    bn: "OTP অনুরোধ",
+  },
+  forgotStepSetPassword: {
+    en: "OTP + new password",
+    bn: "OTP + নতুন পাসওয়ার্ড",
+  },
+  forgotChangeIdentifier: {
+    en: "Use a different username or email",
+    bn: "অন্য ব্যবহারকারী নাম বা ইমেইল ব্যবহার করুন",
+  },
   backToLogin: { en: "← Back to login", bn: "← লগইনে ফিরুন" },
   demoOtpNote: {
     en: "Demo deployment only — in production this one-time password is delivered exclusively by email.",
