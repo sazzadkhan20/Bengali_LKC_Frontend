@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { z } from "zod";
 import { ILI_NOT_AVAILABLE, isIliNotAvailable } from "@/lib/ili";
 import type { Role } from "@/lib/types";
 import { IliFinder } from "@/components/dashboard/IliFinder";
@@ -42,6 +43,7 @@ function Autocomplete<T>({
   onSelect,
   selectedLabel,
   onClear,
+  posFilter,
 }: {
   placeholder: string;
   endpoint: string;
@@ -50,10 +52,13 @@ function Autocomplete<T>({
   onSelect: (item: T) => void;
   selectedLabel?: string;
   onClear?: () => void;
+  /** Optional POS filter forwarded to the lookup API */
+  posFilter?: string;
 }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [hits, setHits] = useState<T[]>([]);
+  const [loading, setLoading] = useState(false);
   const debounced = useDebounced(q, 250);
   const boxRef = useRef<HTMLDivElement>(null);
   const queryReady = debounced.trim().length >= 2;
@@ -62,7 +67,10 @@ function Autocomplete<T>({
   useEffect(() => {
     if (!queryReady) return;
     let cancelled = false;
-    fetch(`${endpoint}?q=${encodeURIComponent(debounced.trim())}`)
+    setLoading(true);
+    const qs = new URLSearchParams({ q: debounced.trim() });
+    if (posFilter) qs.set("pos", posFilter);
+    fetch(`${endpoint}?${qs.toString()}`, { credentials: "include" })
       .then((r) => r.json())
       .then((d) => {
         if (!cancelled) {
@@ -70,11 +78,16 @@ function Autocomplete<T>({
           setOpen(true);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setHits([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [debounced, endpoint, queryReady]);
+  }, [debounced, endpoint, queryReady, posFilter]);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -110,6 +123,9 @@ function Autocomplete<T>({
         placeholder={placeholder}
         className="font-bengali w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
       />
+      {loading && queryReady ? (
+        <p className="mt-1 text-[11px] text-slate-400">Searching lexicon…</p>
+      ) : null}
       {open && visibleHits.length > 0 ? (
         <ul className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
           {visibleHits.map((h) => (
@@ -129,6 +145,9 @@ function Autocomplete<T>({
           ))}
         </ul>
       ) : null}
+      {open && queryReady && !loading && visibleHits.length === 0 ? (
+        <p className="mt-1 text-[11px] text-slate-400">No matches in the lexicon.</p>
+      ) : null}
     </div>
   );
 }
@@ -145,6 +164,24 @@ const SYNSET_REL_TYPES = [
   "mero_member",
   "attribute",
 ] as const;
+
+const BENGALI_RE = /[\u0980-\u09ff]/;
+const ILI_RE = /^\d{8}-[nvar]$/;
+
+const quickInputClientSchema = z.object({
+  writtenForm: z
+    .string()
+    .trim()
+    .min(1, "Bengali word is required.")
+    .max(25, "Maximum 25 characters allowed.")
+    .refine((v) => BENGALI_RE.test(v), {
+      message: "Must contain at least one Bengali Unicode character (U+0980–U+09FF).",
+    }),
+  pos: z.enum(["n", "v", "a", "r"], { message: "Part of speech is required." }),
+  synsetAction: z.enum(["link", "create"]),
+  definitionText: z.string().max(500, "Definition must be at most 500 characters.").optional(),
+  reviewerNote: z.string().max(500, "Note must be at most 500 characters.").optional(),
+});
 
 interface RelRow {
   relType: string;
@@ -179,23 +216,201 @@ export function QuickInputForm({ role }: { role: Role }) {
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const isModerator = role === "SYSTEM_MODERATOR";
+  const isModerator =
+    role === "SYSTEM_MODERATOR" || role === "PLATFORM_ARCHITECT";
   const lockedDefinition =
     synsetAction === "link" && selectedSynset?.definition ? true : false;
 
-  const wordValid =
-    word.trim().length > 0 &&
-    word.trim().length <= 25 &&
-    /[\u0980-\u09ff]/.test(word);
+  const debouncedWord = useDebounced(word.trim(), 400);
+  const debouncedIli = useDebounced(ili.trim(), 400);
+
+  /** Client Zod + server validate for writtenForm/POS/synset/ILI — live as fields change */
+  useEffect(() => {
+    const local: Record<string, string> = {};
+
+    if (debouncedWord) {
+      const wordOnly = z
+        .object({ writtenForm: quickInputClientSchema.shape.writtenForm })
+        .safeParse({ writtenForm: debouncedWord });
+      if (!wordOnly.success) {
+        local.writtenForm = wordOnly.error.issues[0]?.message ?? "Invalid word.";
+      }
+    }
+
+    const extras = z
+      .object({
+        definitionText: quickInputClientSchema.shape.definitionText,
+        reviewerNote: quickInputClientSchema.shape.reviewerNote,
+      })
+      .safeParse({
+        definitionText: defText.trim() || undefined,
+        reviewerNote: note.trim() || undefined,
+      });
+    if (!extras.success) {
+      for (const issue of extras.error.issues) {
+        const key = String(issue.path[0] ?? "form");
+        if (!local[key]) local[key] = issue.message;
+      }
+    }
+
+    if (synsetAction === "link" && selectedSynset && selectedSynset.pos !== pos) {
+      local.synsetId = `POS mismatch: selected synset is "${selectedSynset.pos}" but the lemma is "${pos}".`;
+    }
+    if (synsetAction === "create" && debouncedIli && !isIliNotAvailable(debouncedIli)) {
+      if (!ILI_RE.test(debouncedIli)) {
+        local.iliCode =
+          "ILI code must follow the format {8-digit-offset}-{n|v|a|r}, e.g. 04192858-n — or select N/A.";
+      } else if (!debouncedIli.endsWith(pos)) {
+        local.iliCode = "ILI code POS suffix must match the selected part of speech.";
+      }
+    }
+    if (defLang === "ben" && defText.trim() && !BENGALI_RE.test(defText)) {
+      local.definitionText =
+        "Bengali definitions must contain Bengali script characters.";
+    }
+
+    setErrors((prev) => {
+      const next: Record<string, string> = { ...local };
+      if (prev.duplicate && !next.duplicate) next.duplicate = prev.duplicate;
+      if (prev.captcha) next.captcha = prev.captcha;
+      if (prev.form) next.form = prev.form;
+      if (prev.synsetId && synsetAction === "link" && !selectedSynset && debouncedWord) {
+        next.synsetId = prev.synsetId;
+      }
+      if (prev.senseRelations && !next.senseRelations) next.senseRelations = prev.senseRelations;
+      if (prev.synsetRelations && !next.synsetRelations) next.synsetRelations = prev.synsetRelations;
+      if (prev.directApproveJustification && !next.directApproveJustification) {
+        next.directApproveJustification = prev.directApproveJustification;
+      }
+      if (prev.iliCode && synsetAction === "create" && !debouncedIli && !local.iliCode) {
+        next.iliCode = prev.iliCode;
+      }
+      return next;
+    });
+
+    if (!debouncedWord || local.writtenForm) return;
+
+    let cancelled = false;
+    const readyForServer =
+      (synsetAction === "link" && !!selectedSynset) ||
+      (synsetAction === "create" && !!debouncedIli);
+
+    if (!readyForServer) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    fetch("/api/lookup/validate", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        writtenForm: debouncedWord,
+        pos,
+        synsetAction,
+        synsetId: synsetAction === "link" ? selectedSynset?.id : undefined,
+        iliCode:
+          synsetAction === "create"
+            ? isIliNotAvailable(debouncedIli)
+              ? ILI_NOT_AVAILABLE
+              : debouncedIli
+            : undefined,
+        confirmNearDuplicate: confirmNearDup,
+      }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data.errors && typeof data.errors === "object") {
+          setErrors((prev) => ({ ...prev, ...data.errors }));
+        } else {
+          setErrors((prev) => {
+            const n = { ...prev };
+            delete n.duplicate;
+            if (!local.synsetId) delete n.synsetId;
+            if (!local.iliCode) delete n.iliCode;
+            return n;
+          });
+        }
+        if (data.nearDuplicate) {
+          setNearDupMessage(data.nearDuplicate);
+        } else if (!data.errors?.duplicate) {
+          setNearDupMessage(null);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    debouncedWord,
+    debouncedIli,
+    pos,
+    synsetAction,
+    selectedSynset,
+    defText,
+    defLang,
+    note,
+    confirmNearDup,
+  ]);
 
   async function submit(saveAsDraft: boolean) {
     setBusy(true);
-    setErrors({});
     setSuccess(null);
-    setNearDupMessage(null);
+
+    const client = quickInputClientSchema.safeParse({
+      writtenForm: word.trim(),
+      pos,
+      synsetAction,
+      definitionText: lockedDefinition ? undefined : defText.trim() || undefined,
+      reviewerNote: note.trim() || undefined,
+    });
+    const preErrors: Record<string, string> = {};
+    if (!client.success) {
+      for (const issue of client.error.issues) {
+        const key = String(issue.path[0] ?? "form");
+        if (!preErrors[key]) preErrors[key] = issue.message;
+      }
+    }
+    if (synsetAction === "link" && !selectedSynset) {
+      preErrors.synsetId = "Select an existing synset from search.";
+    }
+    if (synsetAction === "link" && selectedSynset && selectedSynset.pos !== pos) {
+      preErrors.synsetId = `POS mismatch: selected synset is "${selectedSynset.pos}" but the lemma is "${pos}".`;
+    }
+    if (synsetAction === "create") {
+      if (!ili.trim()) {
+        preErrors.iliCode = "Enter an ILI code or select N/A.";
+      } else if (!isIliNotAvailable(ili) && !ILI_RE.test(ili.trim())) {
+        preErrors.iliCode =
+          "ILI code must follow the format {8-digit-offset}-{n|v|a|r}, e.g. 04192858-n — or select N/A.";
+      } else if (!isIliNotAvailable(ili) && !ili.trim().endsWith(pos)) {
+        preErrors.iliCode = "ILI code POS suffix must match the selected part of speech.";
+      }
+    }
+    if (defLang === "ben" && defText.trim() && !BENGALI_RE.test(defText) && !lockedDefinition) {
+      preErrors.definitionText =
+        "Bengali definitions must contain Bengali script characters.";
+    }
+    if (isModerator && directApprove && justification.trim().length < 20) {
+      preErrors.directApproveJustification =
+        "Direct approval requires a written justification of at least 20 characters.";
+    }
+    if (!isModerator && !saveAsDraft && !captcha) {
+      preErrors.captcha = "Please complete the CAPTCHA verification.";
+    }
+    if (Object.keys(preErrors).length > 0) {
+      setErrors(preErrors);
+      setBusy(false);
+      return;
+    }
+
     try {
       const res = await fetch("/api/submissions", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           writtenForm: word.trim(),
@@ -235,14 +450,17 @@ export function QuickInputForm({ role }: { role: Role }) {
         setErrors(data.errors ?? { form: data.error ?? "Submission failed." });
         return;
       }
+      setErrors({});
+      setNearDupMessage(null);
       setSuccess(
         saveAsDraft
           ? `Saved as draft (${data.id}). You can edit it from My Submissions.`
           : data.state === "VALIDATED"
             ? `Entry ${data.id} submitted and directly VALIDATED.`
-            : `Entry ${data.id} submitted — now in PENDING_REVIEW.`
+            : data.state === "UNDER_REVIEW"
+              ? `Entry ${data.id} held UNDER_REVIEW (anti-bot timing). A System Moderator will clear it.`
+              : `Entry ${data.id} submitted — now in PENDING_REVIEW.`
       );
-      // reset
       setWord("");
       setSelectedSynset(null);
       setIli("");
@@ -267,6 +485,12 @@ export function QuickInputForm({ role }: { role: Role }) {
       <p className="mt-1 text-xs font-medium text-rose-600">{errors[key]}</p>
     ) : null;
 
+  const inputBorder = (key: string) =>
+    errors[key]
+      ? "border-rose-400 focus:border-rose-500 focus:ring-rose-200"
+      : "border-slate-300 focus:border-emerald-500 focus:ring-emerald-200";
+
+
   return (
     <form
       className="space-y-6"
@@ -280,9 +504,9 @@ export function QuickInputForm({ role }: { role: Role }) {
           ✓ {success}
         </div>
       ) : null}
-      {errors.form || errors.timing || errors.captcha || errors.duplicate ? (
+      {errors.form || errors.captcha || errors.duplicate ? (
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
-          {errors.form ?? errors.timing ?? errors.captcha ?? errors.duplicate}
+          {errors.form ?? errors.captcha ?? errors.duplicate}
         </div>
       ) : null}
       {nearDupMessage ? (
@@ -321,16 +545,20 @@ export function QuickInputForm({ role }: { role: Role }) {
           </label>
           <input
             value={word}
-            onChange={(e) => setWord(e.target.value)}
+            onChange={(e) => {
+              setWord(e.target.value);
+              setErrors((prev) => {
+                const n = { ...prev };
+                delete n.writtenForm;
+                delete n.duplicate;
+                return n;
+              });
+            }}
             onBlur={() => setWord((w) => w.trim())}
             placeholder="যেমন: মুঠোফোন"
             lang="bn"
             maxLength={25}
-            className={`font-bengali w-full rounded-xl border px-3 py-2.5 text-lg outline-none transition focus:ring-2 ${
-              word && !wordValid
-                ? "border-rose-300 focus:border-rose-500 focus:ring-rose-200"
-                : "border-slate-300 focus:border-emerald-500 focus:ring-emerald-200"
-            }`}
+            className={`font-bengali w-full rounded-xl border px-3 py-2.5 text-lg outline-none transition focus:ring-2 ${inputBorder("writtenForm")}`}
           />
           <p className="mt-1 text-[11px] text-slate-400">
             Bengali Unicode (U+0980–U+09FF) · max 25 characters ·{" "}
@@ -395,10 +623,19 @@ export function QuickInputForm({ role }: { role: Role }) {
         {synsetAction === "link" ? (
           <div className="mt-4">
             <Autocomplete<SynsetHit>
-              placeholder="Search by synset ID, member word or definition…"
+              placeholder="Search by Bengali word, synset ID, or definition…"
               endpoint="/api/lookup/synsets"
+              posFilter={pos}
               keyOf={(h) => h.id}
-              onSelect={(h) => setSelectedSynset(h)}
+              onSelect={(h) => {
+                setSelectedSynset(h);
+                setErrors((prev) => {
+                  const n = { ...prev };
+                  delete n.synsetId;
+                  delete n.duplicate;
+                  return n;
+                });
+              }}
               selectedLabel={
                 selectedSynset
                   ? `${selectedSynset.id} (${selectedSynset.pos}) — ${selectedSynset.words.join(", ") || "no words"} ${selectedSynset.definition ? `· ${selectedSynset.definition}` : ""}`
@@ -503,7 +740,7 @@ export function QuickInputForm({ role }: { role: Role }) {
                     setIliPicked(false);
                   }}
                   placeholder="ILI code, e.g. 04192858-n — or pick one below / select N/A"
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2.5 font-mono text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                  className={`w-full rounded-xl border px-3 py-2.5 font-mono text-sm outline-none transition focus:ring-2 ${inputBorder("iliCode")}`}
                 />
               )}
               <p className="mt-1 text-[11px] text-slate-400">
@@ -564,15 +801,24 @@ export function QuickInputForm({ role }: { role: Role }) {
           ) : (
             <textarea
               value={defText}
-              onChange={(e) => setDefText(e.target.value)}
+              onChange={(e) => {
+                setDefText(e.target.value);
+                setErrors((prev) => {
+                  const n = { ...prev };
+                  delete n.definitionText;
+                  return n;
+                });
+              }}
               maxLength={500}
               rows={3}
               lang="bn"
               placeholder="ধারণাটির সংজ্ঞা লিখুন…"
-              className="font-bengali w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+              className={`font-bengali w-full rounded-xl border px-3 py-2.5 text-sm outline-none transition focus:ring-2 ${inputBorder("definitionText")}`}
             />
           )}
           {fieldError("definitionText")}
+          {fieldError("senseRelations")}
+          {fieldError("synsetRelations")}
         </div>
       </div>
 
@@ -601,12 +847,27 @@ export function QuickInputForm({ role }: { role: Role }) {
                 </select>
                 <div className="min-w-0 flex-1">
                   {rel.target ? (
-                    <span className="font-bengali block truncate rounded-lg bg-emerald-50 px-2 py-2 text-xs font-semibold text-emerald-900 ring-1 ring-inset ring-emerald-200">
-                      {rel.label}
-                    </span>
+                    <div className="flex min-w-0 flex-1 items-center gap-1 rounded-lg bg-emerald-50 px-2 py-1.5 ring-1 ring-inset ring-emerald-200">
+                      <span className="font-bengali min-w-0 flex-1 truncate text-xs font-semibold text-emerald-900">
+                        {rel.label}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSenseRels((rs) =>
+                            rs.map((r, j) =>
+                              j === i ? { ...r, target: "", label: "" } : r
+                            )
+                          )
+                        }
+                        className="shrink-0 text-[10px] font-bold text-emerald-700 hover:text-rose-600"
+                      >
+                        change
+                      </button>
+                    </div>
                   ) : (
                     <Autocomplete<WordHit>
-                      placeholder="Target word…"
+                      placeholder="Search Bengali word for sense target…"
                       endpoint="/api/lookup/words"
                       keyOf={(h) => h.senseId}
                       onSelect={(h) =>
@@ -621,6 +882,9 @@ export function QuickInputForm({ role }: { role: Role }) {
                       render={(h) => (
                         <span>
                           <span className="font-bengali font-semibold">{h.lemma}</span>{" "}
+                          <span className="rounded bg-slate-100 px-1 text-[10px] font-bold uppercase">
+                            {h.pos}
+                          </span>{" "}
                           <span className="font-mono text-[10px] text-slate-400">{h.senseId}</span>
                           {h.definition ? (
                             <span className="font-bengali block text-xs text-slate-400">{h.definition}</span>
@@ -675,12 +939,27 @@ export function QuickInputForm({ role }: { role: Role }) {
                 </select>
                 <div className="min-w-0 flex-1">
                   {rel.target ? (
-                    <span className="font-bengali block truncate rounded-lg bg-emerald-50 px-2 py-2 text-xs font-semibold text-emerald-900 ring-1 ring-inset ring-emerald-200">
-                      {rel.label}
-                    </span>
+                    <div className="flex min-w-0 flex-1 items-center gap-1 rounded-lg bg-emerald-50 px-2 py-1.5 ring-1 ring-inset ring-emerald-200">
+                      <span className="font-bengali min-w-0 flex-1 truncate text-xs font-semibold text-emerald-900">
+                        {rel.label}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSynsetRels((rs) =>
+                            rs.map((r, j) =>
+                              j === i ? { ...r, target: "", label: "" } : r
+                            )
+                          )
+                        }
+                        className="shrink-0 text-[10px] font-bold text-emerald-700 hover:text-rose-600"
+                      >
+                        change
+                      </button>
+                    </div>
                   ) : (
                     <Autocomplete<SynsetHit>
-                      placeholder="Target synset…"
+                      placeholder="Search by word, synset ID, or definition…"
                       endpoint="/api/lookup/synsets"
                       keyOf={(h) => h.id}
                       onSelect={(h) =>
@@ -695,7 +974,15 @@ export function QuickInputForm({ role }: { role: Role }) {
                       render={(h) => (
                         <span>
                           <span className="font-mono text-xs font-bold text-emerald-700">{h.id}</span>{" "}
+                          <span className="rounded bg-slate-100 px-1 text-[10px] font-bold uppercase">
+                            {h.pos}
+                          </span>{" "}
                           <span className="font-bengali">{h.words.join(", ")}</span>
+                          {h.definition ? (
+                            <span className="font-bengali block text-xs text-slate-400">
+                              {h.definition}
+                            </span>
+                          ) : null}
                         </span>
                       )}
                     />
@@ -804,8 +1091,8 @@ export function QuickInputForm({ role }: { role: Role }) {
           Save as Draft
         </button>
         <p className="text-[11px] text-slate-400">
-          Server checks: honeypot → timing (≥10s) → CAPTCHA → duplicate
-          detection (SRS §6.2).
+          Server checks: honeypot → timing (too fast → UNDER_REVIEW) → CAPTCHA →
+          duplicate detection (SRS §6.2).
         </p>
       </div>
     </form>
