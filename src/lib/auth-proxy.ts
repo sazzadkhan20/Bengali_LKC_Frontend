@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { backendFetch } from "@/lib/backend";
 import { clearAuthCookies, setAuthCookies } from "@/lib/auth-cookies";
+import { refreshTokens } from "@/lib/token-refresh";
 
 type AuthBody = Record<string, unknown> & {
   accessToken?: string;
@@ -37,12 +38,13 @@ export async function proxyRefresh(refreshToken: string | undefined) {
     clearAuthCookies(res);
     return res;
   }
-  const result = await backendFetch<AuthBody>("/api/auth/refresh", {
-    method: "POST",
-    refreshToken,
-  });
-  const res = NextResponse.json(result.data, { status: result.status });
-  if (result.ok) applyTokenResponse(res, result.data);
-  else clearAuthCookies(res);
+  const tokens = await refreshTokens(refreshToken);
+  if (!tokens) {
+    const res = NextResponse.json({ error: "Invalid or revoked refresh token." }, { status: 401 });
+    clearAuthCookies(res);
+    return res;
+  }
+  const res = NextResponse.json({ ok: true, expiresIn: tokens.expiresIn });
+  setAuthCookies(res, tokens);
   return res;
 }

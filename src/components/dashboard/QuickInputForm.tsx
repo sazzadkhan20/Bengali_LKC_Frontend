@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { z } from "zod";
 import { ILI_NOT_AVAILABLE, isIliNotAvailable } from "@/lib/ili";
@@ -24,6 +24,13 @@ interface WordHit {
   lemma: string;
   pos: string;
   definition?: string;
+}
+
+/** randomUUID is only available on HTTPS / localhost; fall back to getRandomValues elsewhere. */
+function newIdempotencyKey(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return "qi-" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function useDebounced<T>(value: T, ms: number): T {
@@ -58,16 +65,17 @@ function Autocomplete<T>({
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [hits, setHits] = useState<T[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [resolvedKey, setResolvedKey] = useState("");
   const debounced = useDebounced(q, 250);
   const boxRef = useRef<HTMLDivElement>(null);
   const queryReady = debounced.trim().length >= 2;
-  const visibleHits = queryReady ? hits : [];
+  const requestKey = `${endpoint}|${posFilter ?? ""}|${debounced.trim()}`;
+  const loading = queryReady && resolvedKey !== requestKey;
+  const visibleHits = queryReady && resolvedKey === requestKey ? hits : [];
 
   useEffect(() => {
     if (!queryReady) return;
     let cancelled = false;
-    setLoading(true);
     const qs = new URLSearchParams({ q: debounced.trim() });
     if (posFilter) qs.set("pos", posFilter);
     fetch(`${endpoint}?${qs.toString()}`, { credentials: "include" })
@@ -82,12 +90,12 @@ function Autocomplete<T>({
         if (!cancelled) setHits([]);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setResolvedKey(requestKey);
       });
     return () => {
       cancelled = true;
     };
-  }, [debounced, endpoint, queryReady, posFilter]);
+  }, [debounced, endpoint, queryReady, posFilter, requestKey]);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -189,10 +197,43 @@ interface RelRow {
   label: string;
 }
 
+function relationErrors(
+  senseRels: RelRow[],
+  synsetRels: RelRow[],
+  linkedSynsetId: string | undefined
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const seenSense = new Set<string>();
+  senseRels.forEach((r, i) => {
+    if (out.senseRelations) return;
+    if (!r.target) {
+      out.senseRelations = `Sense relation #${i + 1}: pick a target word from search, or remove the row.`;
+    } else if (seenSense.has(`${r.relType}|${r.target}`)) {
+      out.senseRelations = `Sense relation #${i + 1} is a duplicate of an earlier row.`;
+    }
+    seenSense.add(`${r.relType}|${r.target}`);
+  });
+  const seenSyn = new Set<string>();
+  synsetRels.forEach((r, i) => {
+    if (out.synsetRelations) return;
+    if (!r.target) {
+      out.synsetRelations = `Synset relation #${i + 1}: pick a target synset from search, or remove the row.`;
+    } else if (linkedSynsetId && r.target === linkedSynsetId) {
+      out.synsetRelations = `Synset relation #${i + 1} points to the same synset this word is linked to.`;
+    } else if (seenSyn.has(`${r.relType}|${r.target}`)) {
+      out.synsetRelations = `Synset relation #${i + 1} is a duplicate of an earlier row.`;
+    }
+    seenSyn.add(`${r.relType}|${r.target}`);
+  });
+  return out;
+}
+
 export function QuickInputForm({ role }: { role: Role }) {
   const router = useRouter();
   const [mountedAt] = useState(() => Date.now());
   const mountedAtRef = useRef(mountedAt);
+  /** Same key for retries / double-clicks of one entry; renewed only after a successful submit. */
+  const idempotencyKeyRef = useRef<string | null>(null);
 
   const [word, setWord] = useState("");
   const [pos, setPos] = useState("n");
@@ -212,7 +253,8 @@ export function QuickInputForm({ role }: { role: Role }) {
   const [justification, setJustification] = useState("");
   const [confirmNearDup, setConfirmNearDup] = useState(false);
   const [nearDupMessage, setNearDupMessage] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  /** Errors from the server (live validate / submit) and submit-time checks. */
+  const [serverErrors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -224,8 +266,8 @@ export function QuickInputForm({ role }: { role: Role }) {
   const debouncedWord = useDebounced(word.trim(), 400);
   const debouncedIli = useDebounced(ili.trim(), 400);
 
-  /** Client Zod + server validate for writtenForm/POS/synset/ILI — live as fields change */
-  useEffect(() => {
+  /** Client-side Zod errors, derived on every render so they appear immediately. */
+  const clientErrors = useMemo(() => {
     const local: Record<string, string> = {};
 
     if (debouncedWord) {
@@ -269,38 +311,43 @@ export function QuickInputForm({ role }: { role: Role }) {
         "Bengali definitions must contain Bengali script characters.";
     }
 
-    setErrors((prev) => {
-      const next: Record<string, string> = { ...local };
-      if (prev.duplicate && !next.duplicate) next.duplicate = prev.duplicate;
-      if (prev.captcha) next.captcha = prev.captcha;
-      if (prev.form) next.form = prev.form;
-      if (prev.synsetId && synsetAction === "link" && !selectedSynset && debouncedWord) {
-        next.synsetId = prev.synsetId;
-      }
-      if (prev.senseRelations && !next.senseRelations) next.senseRelations = prev.senseRelations;
-      if (prev.synsetRelations && !next.synsetRelations) next.synsetRelations = prev.synsetRelations;
-      if (prev.directApproveJustification && !next.directApproveJustification) {
-        next.directApproveJustification = prev.directApproveJustification;
-      }
-      if (prev.iliCode && synsetAction === "create" && !debouncedIli && !local.iliCode) {
-        next.iliCode = prev.iliCode;
-      }
-      return next;
-    });
+    // Relation rows are only checked once a target is picked, so a fresh empty row isn't red.
+    Object.assign(
+      local,
+      relationErrors(
+        senseRels.filter((r) => r.target),
+        synsetRels.filter((r) => r.target),
+        synsetAction === "link" ? selectedSynset?.id : undefined
+      )
+    );
+    return local;
+  }, [
+    debouncedWord,
+    debouncedIli,
+    pos,
+    synsetAction,
+    selectedSynset,
+    defText,
+    defLang,
+    note,
+    senseRels,
+    synsetRels,
+  ]);
 
-    if (!debouncedWord || local.writtenForm) return;
+  const errors = useMemo(
+    () => ({ ...serverErrors, ...clientErrors }),
+    [serverErrors, clientErrors]
+  );
 
-    let cancelled = false;
+  /** Server-side duplicate / linkage / ILI validation against the full lexicon. */
+  useEffect(() => {
+    if (!debouncedWord || clientErrors.writtenForm) return;
     const readyForServer =
       (synsetAction === "link" && !!selectedSynset) ||
       (synsetAction === "create" && !!debouncedIli);
+    if (!readyForServer) return;
 
-    if (!readyForServer) {
-      return () => {
-        cancelled = true;
-      };
-    }
-
+    let cancelled = false;
     fetch("/api/lookup/validate", {
       method: "POST",
       credentials: "include",
@@ -322,17 +369,16 @@ export function QuickInputForm({ role }: { role: Role }) {
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;
-        if (data.errors && typeof data.errors === "object") {
-          setErrors((prev) => ({ ...prev, ...data.errors }));
-        } else {
-          setErrors((prev) => {
-            const n = { ...prev };
-            delete n.duplicate;
-            if (!local.synsetId) delete n.synsetId;
-            if (!local.iliCode) delete n.iliCode;
-            return n;
-          });
-        }
+        setErrors((prev) => {
+          const n = { ...prev };
+          delete n.duplicate;
+          delete n.synsetId;
+          delete n.iliCode;
+          delete n.writtenForm;
+          return data.errors && typeof data.errors === "object"
+            ? { ...n, ...data.errors }
+            : n;
+        });
         if (data.nearDuplicate) {
           setNearDupMessage(data.nearDuplicate);
         } else if (!data.errors?.duplicate) {
@@ -350,10 +396,8 @@ export function QuickInputForm({ role }: { role: Role }) {
     pos,
     synsetAction,
     selectedSynset,
-    defText,
-    defLang,
-    note,
     confirmNearDup,
+    clientErrors.writtenForm,
   ]);
 
   async function submit(saveAsDraft: boolean) {
@@ -394,6 +438,14 @@ export function QuickInputForm({ role }: { role: Role }) {
       preErrors.definitionText =
         "Bengali definitions must contain Bengali script characters.";
     }
+    Object.assign(
+      preErrors,
+      relationErrors(
+        senseRels,
+        synsetRels,
+        synsetAction === "link" ? selectedSynset?.id : undefined
+      )
+    );
     if (isModerator && directApprove && justification.trim().length < 20) {
       preErrors.directApproveJustification =
         "Direct approval requires a written justification of at least 20 characters.";
@@ -407,11 +459,15 @@ export function QuickInputForm({ role }: { role: Role }) {
       return;
     }
 
+    idempotencyKeyRef.current ??= newIdempotencyKey();
     try {
       const res = await fetch("/api/submissions", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKeyRef.current,
+        },
         body: JSON.stringify({
           writtenForm: word.trim(),
           pos,
@@ -450,10 +506,13 @@ export function QuickInputForm({ role }: { role: Role }) {
         setErrors(data.errors ?? { form: data.error ?? "Submission failed." });
         return;
       }
+      idempotencyKeyRef.current = null;
       setErrors({});
       setNearDupMessage(null);
       setSuccess(
-        saveAsDraft
+        !data.id
+          ? "Submission received."
+          : saveAsDraft
           ? `Saved as draft (${data.id}). You can edit it from My Submissions.`
           : data.state === "VALIDATED"
             ? `Entry ${data.id} submitted and directly VALIDATED.`
@@ -577,6 +636,14 @@ export function QuickInputForm({ role }: { role: Role }) {
             onChange={(e) => {
               setPos(e.target.value);
               setSelectedSynset(null);
+              setErrors((prev) => {
+                const n = { ...prev };
+                delete n.pos;
+                delete n.synsetId;
+                delete n.iliCode;
+                delete n.duplicate;
+                return n;
+              });
             }}
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
           >
@@ -738,6 +805,12 @@ export function QuickInputForm({ role }: { role: Role }) {
                   onChange={(e) => {
                     setIli(e.target.value);
                     setIliPicked(false);
+                    setErrors((prev) => {
+                      const n = { ...prev };
+                      delete n.iliCode;
+                      delete n.duplicate;
+                      return n;
+                    });
                   }}
                   placeholder="ILI code, e.g. 04192858-n — or pick one below / select N/A"
                   className={`w-full rounded-xl border px-3 py-2.5 font-mono text-sm outline-none transition focus:ring-2 ${inputBorder("iliCode")}`}
@@ -817,8 +890,6 @@ export function QuickInputForm({ role }: { role: Role }) {
             />
           )}
           {fieldError("definitionText")}
-          {fieldError("senseRelations")}
-          {fieldError("synsetRelations")}
         </div>
       </div>
 
@@ -913,6 +984,7 @@ export function QuickInputForm({ role }: { role: Role }) {
             >
               + Add sense relation
             </button>
+            {fieldError("senseRelations")}
           </div>
         </fieldset>
 
@@ -1007,6 +1079,7 @@ export function QuickInputForm({ role }: { role: Role }) {
             >
               + Add synset relation
             </button>
+            {fieldError("synsetRelations")}
           </div>
         </fieldset>
       </div>
@@ -1045,10 +1118,26 @@ export function QuickInputForm({ role }: { role: Role }) {
             <div className="mt-3">
               <textarea
                 value={justification}
-                onChange={(e) => setJustification(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setJustification(v);
+                  setErrors((prev) => {
+                    const n = { ...prev };
+                    if (v.trim().length > 0 && v.trim().length < 20) {
+                      n.directApproveJustification = `Justification needs at least 20 characters (${v.trim().length}/20).`;
+                    } else {
+                      delete n.directApproveJustification;
+                    }
+                    return n;
+                  });
+                }}
                 rows={2}
                 placeholder="Mandatory written justification (minimum 20 characters)…"
-                className="w-full rounded-xl border border-purple-300 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-purple-200"
+                className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:ring-2 ${
+                  errors.directApproveJustification
+                    ? "border-rose-400 focus:ring-rose-200"
+                    : "border-purple-300 focus:ring-purple-200"
+                }`}
               />
               {fieldError("directApproveJustification")}
             </div>
@@ -1062,7 +1151,14 @@ export function QuickInputForm({ role }: { role: Role }) {
           <input
             type="checkbox"
             checked={captcha}
-            onChange={(e) => setCaptcha(e.target.checked)}
+            onChange={(e) => {
+              setCaptcha(e.target.checked);
+              setErrors((prev) => {
+                const n = { ...prev };
+                delete n.captcha;
+                return n;
+              });
+            }}
             className="h-5 w-5 accent-emerald-700"
           />
           <span className="text-sm font-medium text-slate-700">
@@ -1080,7 +1176,11 @@ export function QuickInputForm({ role }: { role: Role }) {
           disabled={busy}
           className="rounded-xl bg-emerald-700 px-7 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 disabled:opacity-50"
         >
-          {busy ? "Submitting…" : "Submit for Review"}
+          {busy
+            ? "Submitting…"
+            : isModerator && directApprove
+              ? "Submit & Validate directly"
+              : "Submit for Review"}
         </button>
         <button
           type="button"

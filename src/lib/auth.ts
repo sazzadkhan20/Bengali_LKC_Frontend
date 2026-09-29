@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import type { Role, Session, User } from "./types";
 import { backendFetch } from "./backend";
 import { ACCESS_COOKIE, REFRESH_COOKIE } from "./auth-cookies";
+import { isAccessTokenFresh, refreshTokens } from "./token-refresh";
 
 export const SESSION_COOKIE = ACCESS_COOKIE;
 
@@ -52,7 +53,7 @@ const MATRIX: Record<Permission, Role[]> = {
   audit_log: ["PLATFORM_ARCHITECT", "SYSTEM_MODERATOR"],
   xml_export: ["PLATFORM_ARCHITECT", "SYSTEM_MODERATOR"],
   quick_input: ["PLATFORM_ARCHITECT", "SYSTEM_MODERATOR", "CONTRIBUTOR"],
-  direct_approval: ["SYSTEM_MODERATOR"],
+  direct_approval: ["PLATFORM_ARCHITECT", "SYSTEM_MODERATOR"],
   view_pending_queue: ["PLATFORM_ARCHITECT", "SYSTEM_MODERATOR", "LEXICAL_EDITOR"],
   primary_validate: ["PLATFORM_ARCHITECT", "SYSTEM_MODERATOR", "LEXICAL_EDITOR"],
   view_editor_approved_queue: ["PLATFORM_ARCHITECT", "SYSTEM_MODERATOR", "CHIEF_LEXICAL_EDITOR"],
@@ -131,6 +132,10 @@ export async function getSessionPayload(): Promise<SessionPayload | null> {
     const refresh = jar.get(REFRESH_COOKIE)?.value ?? null;
     if (!access && !refresh) return null;
 
+    if (!isAccessTokenFresh(access) && refresh) {
+      access = (await refreshTokens(refresh))?.accessToken ?? null;
+    }
+
     let result = access
       ? await backendFetch<Record<string, unknown>>("/api/auth/session", {
           method: "GET",
@@ -138,13 +143,10 @@ export async function getSessionPayload(): Promise<SessionPayload | null> {
         })
       : { ok: false, status: 401, data: {} as Record<string, unknown> };
 
-    if ((!result.ok || result.status === 401) && refresh) {
-      const refreshed = await backendFetch<Record<string, unknown>>("/api/auth/refresh", {
-        method: "POST",
-        refreshToken: refresh,
-      });
-      if (refreshed.ok && typeof refreshed.data.accessToken === "string") {
-        access = refreshed.data.accessToken;
+    if (result.status === 401 && refresh) {
+      const refreshed = await refreshTokens(refresh);
+      if (refreshed && refreshed.accessToken !== access) {
+        access = refreshed.accessToken;
         result = await backendFetch<Record<string, unknown>>("/api/auth/session", {
           method: "GET",
           accessToken: access,
