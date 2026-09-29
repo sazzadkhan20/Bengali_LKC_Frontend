@@ -40,16 +40,18 @@ export function ReviewActions({
   submissionId,
   actions,
   reviewers,
+  assignedTo,
 }: {
   submissionId: string;
   actions: ActionSpec[];
   reviewers?: { id: string; name: string }[];
+  assignedTo?: string | null;
 }) {
   const router = useRouter();
   const [active, setActive] = useState<ActionSpec | null>(null);
   const [comment, setComment] = useState("");
   const [targetState, setTargetState] = useState<EntryState>("PENDING_REVIEW");
-  const [assignTo, setAssignTo] = useState("");
+  const [assignTo, setAssignTo] = useState(assignedTo ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 

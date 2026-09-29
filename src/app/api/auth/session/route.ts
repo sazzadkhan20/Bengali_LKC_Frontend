@@ -7,13 +7,9 @@ import {
   clearAuthCookies,
   setAuthCookies,
 } from "@/lib/auth-cookies";
+import { refreshTokens, type RotatedTokens } from "@/lib/token-refresh";
 
-type AuthBody = Record<string, unknown> & {
-  accessToken?: string;
-  refreshToken?: string;
-  expiresIn?: number;
-  error?: string;
-};
+type AuthBody = Record<string, unknown> & { error?: string };
 
 /**
  * Session API — returns all user data needed by the frontend after login.
@@ -29,7 +25,7 @@ export async function GET() {
   }
 
   try {
-    let rotated: AuthBody | null = null;
+    let rotated: RotatedTokens | null = null;
 
     let result = access
       ? await backendFetch<AuthBody>("/api/auth/session", {
@@ -38,21 +34,14 @@ export async function GET() {
         })
       : { ok: false, status: 401, data: { error: "Unauthorized" } as AuthBody };
 
-    if ((!result.ok || result.status === 401) && refresh) {
-      const refreshed = await backendFetch<AuthBody>("/api/auth/refresh", {
-        method: "POST",
-        refreshToken: refresh,
-      });
-      if (!refreshed.ok || typeof refreshed.data.accessToken !== "string") {
-        const res = NextResponse.json(
-          { error: refreshed.data.error ?? "Unauthorized" },
-          { status: 401 }
-        );
+    if (result.status === 401 && refresh) {
+      rotated = await refreshTokens(refresh);
+      if (!rotated) {
+        const res = NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         clearAuthCookies(res);
         return res;
       }
-      rotated = refreshed.data;
-      access = refreshed.data.accessToken;
+      access = rotated.accessToken;
       result = await backendFetch<AuthBody>("/api/auth/session", {
         method: "GET",
         accessToken: access,
@@ -69,14 +58,7 @@ export async function GET() {
     }
 
     const res = NextResponse.json(result.data, { status: 200 });
-    if (rotated?.accessToken) {
-      setAuthCookies(res, {
-        accessToken: rotated.accessToken,
-        refreshToken:
-          typeof rotated.refreshToken === "string" ? rotated.refreshToken : undefined,
-        expiresIn: typeof rotated.expiresIn === "number" ? rotated.expiresIn : 3600,
-      });
-    }
+    if (rotated) setAuthCookies(res, rotated);
     return res;
   } catch (err) {
     console.error("[auth/session] backend unreachable", err);

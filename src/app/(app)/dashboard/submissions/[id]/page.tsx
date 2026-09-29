@@ -1,10 +1,10 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
+import type { ReactNode } from "react";
 import { getSession, hasPermission } from "@/lib/auth";
-import { store, userById } from "@/lib/store";
-import { synsetById } from "@/lib/lexicon";
-import { formatDateTime, REL_LABEL, ROLE_LABEL } from "@/lib/format";
+import { backendAuthedFetch } from "@/lib/backend-auth";
+import { formatDateTime, REL_LABEL, ROLE_LABEL, STATE_LABEL, timeAgo } from "@/lib/format";
 import {
   Card,
   CardHeader,
@@ -18,12 +18,60 @@ import {
   ReviewActions,
   type ActionSpec,
 } from "@/components/dashboard/ReviewActions";
-import type { Session, Submission } from "@/lib/types";
+import type { EntryState, POS, Role, Session, Submission } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Submission" };
 
+type HistoryStep = Submission["history"][number] & {
+  actorName?: string | null;
+  secondsInPreviousState?: number | null;
+};
+
+type SubmissionDetail = Omit<Submission, "history"> & {
+  history: HistoryStep[];
+  lastUpdatedBy?: string | null;
+  currentStateSince?: string | null;
+  submittedForReviewAt?: string | null;
+  users: Record<string, { name: string; role: Role }>;
+  synset?: {
+    id: string;
+    ili: string | null;
+    pos: POS | null;
+    definitionText: string | null;
+    definitionLanguage: string | null;
+    members: string[];
+  };
+  iliInfo?: { ili: string; pos: POS | null; words: string | null; gloss: string | null };
+  senseRelationDetails: {
+    relType: string;
+    target: string;
+    found: boolean;
+    writtenForm: string | null;
+    pos: POS | null;
+    synsetId: string | null;
+    definition: string | null;
+  }[];
+  synsetRelationDetails: {
+    relType: string;
+    target: string;
+    found: boolean;
+    pos: POS | null;
+    ili: string | null;
+    definition: string | null;
+    members: string[];
+  }[];
+  cases: {
+    id: string;
+    status: string;
+    disputeType: string | null;
+    openedAt: string | null;
+    finalVerdict: string | null;
+  }[];
+  reviewers?: { id: string; name: string; role: Role }[];
+};
+
 /** Compute the actions available to this user for this submission (SRS §5.2). */
-function actionsFor(session: Session, sub: Submission): ActionSpec[] {
+function actionsFor(session: Session, sub: Pick<Submission, "state" | "contributorId">): ActionSpec[] {
   const role = session.role;
   const isOwner = sub.contributorId === session.userId;
   const actions: ActionSpec[] = [];
@@ -105,6 +153,50 @@ function actionsFor(session: Session, sub: Submission): ActionSpec[] {
   return actions;
 }
 
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)} hr`;
+  return `${Math.round(seconds / 86400)} days`;
+}
+
+function stateLabel(state: string): string {
+  return STATE_LABEL[state as EntryState] ?? state;
+}
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-2 sm:px-5">
+      <dt className="text-slate-400">{label}</dt>
+      <dd className="col-span-2 min-w-0">{children}</dd>
+    </div>
+  );
+}
+
+function IliChip({ ili }: { ili: string }) {
+  return (
+    <span className="rounded bg-violet-50 px-1.5 py-0.5 font-mono text-[11px] text-violet-700 ring-1 ring-inset ring-violet-200">
+      ILI {ili}
+    </span>
+  );
+}
+
+function Members({ words }: { words: string[] }) {
+  if (words.length === 0) return null;
+  return (
+    <span className="font-bengali flex flex-wrap gap-1">
+      {words.map((w) => (
+        <span
+          key={w}
+          className="rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-800 ring-1 ring-inset ring-emerald-200"
+        >
+          {w}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export default async function SubmissionDetailPage({
   params,
 }: {
@@ -113,24 +205,33 @@ export default async function SubmissionDetailPage({
   const session = await getSession();
   if (!session) redirect("/login");
   const { id } = await params;
-  const sub = store.submissions.find((s) => s.id === id);
-  if (!sub) notFound();
+  const result = await backendAuthedFetch<SubmissionDetail>(
+    `/api/submissions/${encodeURIComponent(id)}`
+  );
+  if (result.status === 404) notFound();
+  if (result.status === 401) redirect("/login");
+  if (result.status === 403) redirect("/dashboard");
+  if (!result.ok) {
+    throw new Error(
+      (result.data as { error?: string }).error ?? "Could not load submission."
+    );
+  }
+  const sub = result.data;
+  const nameOf = (userId?: string | null) =>
+    userId ? (sub.users[userId]?.name ?? userId) : "";
 
-  const isOwner = sub.contributorId === session.userId;
-  const canSeeOthers =
-    hasPermission(session.role, "view_pending_queue") ||
-    hasPermission(session.role, "view_editor_approved_queue") ||
-    session.role === "ARBITRATION_CURATOR";
-  if (!isOwner && !canSeeOthers) redirect("/dashboard");
-
-  const synset = sub.synsetId ? synsetById.get(sub.synsetId) : undefined;
-  const relatedCase = store.cases.find((c) => c.submissionId === sub.id);
+  const synset = sub.synset;
   const actions = actionsFor(session, sub);
-  const reviewers = hasPermission(session.role, "assign_entries")
-    ? store.users
-        .filter((u) => ["LEXICAL_EDITOR", "CHIEF_LEXICAL_EDITOR"].includes(u.role))
-        .map((u) => ({ id: u.id, name: `${u.name} (${ROLE_LABEL[u.role]})` }))
-    : undefined;
+  const reviewers = sub.reviewers?.map((u) => ({
+    id: u.id,
+    name: `${u.name} (${ROLE_LABEL[u.role]})`,
+  }));
+  const history = [...sub.history].reverse();
+  const iliWords = sub.iliInfo?.words?.trim() || null;
+  const iliGloss =
+    sub.iliInfo?.gloss?.trim() && sub.iliInfo.gloss.trim() !== synset?.definitionText?.trim()
+      ? sub.iliInfo.gloss.trim()
+      : null;
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -145,14 +246,41 @@ export default async function SubmissionDetailPage({
         subtitle={
           <span>
             Submission <code className="font-mono">{sub.id}</code> by{" "}
-            {userById(sub.contributorId)?.name} ·{" "}
-            {formatDateTime(sub.createdAt)}
-            {sub.assignedTo
-              ? ` · assigned to ${userById(sub.assignedTo)?.name}`
-              : ""}
+            {nameOf(sub.contributorId)} · {formatDateTime(sub.createdAt)}
           </span>
         }
       />
+
+      {/* at-a-glance status strip */}
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          {
+            label: "Current state",
+            value: stateLabel(sub.state),
+            hint: sub.currentStateSince ? `since ${timeAgo(sub.currentStateSince)}` : undefined,
+          },
+          {
+            label: "Submitted for review",
+            value: sub.submittedForReviewAt ? formatDateTime(sub.submittedForReviewAt) : "Not yet",
+            hint: sub.submittedForReviewAt ? timeAgo(sub.submittedForReviewAt) : "still a draft",
+          },
+          {
+            label: "Assigned reviewer",
+            value: sub.assignedTo ? nameOf(sub.assignedTo) : "Unassigned",
+          },
+          {
+            label: "Last updated",
+            value: formatDateTime(sub.updatedAt),
+            hint: sub.lastUpdatedBy ? `by ${nameOf(sub.lastUpdatedBy)}` : undefined,
+          },
+        ].map((c) => (
+          <div key={c.label} className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{c.label}</p>
+            <p className="mt-0.5 text-sm font-bold text-slate-800">{c.value}</p>
+            {c.hint ? <p className="text-xs text-slate-400">{c.hint}</p> : null}
+          </div>
+        ))}
+      </div>
 
       {/* reviewer feedback banners */}
       {sub.state === "FLAGGED" && sub.editorComment ? (
@@ -174,148 +302,221 @@ export default async function SubmissionDetailPage({
           <strong>Rejection reason:</strong> {sub.rejectionReason}
         </div>
       ) : null}
-      {relatedCase ? (
-        <div className="mb-5 rounded-xl border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-900">
-          ⚖ This entry is linked to arbitration case{" "}
-          <Link
-            href={`/dashboard/arbitration/${relatedCase.id}`}
-            className="font-bold underline"
-          >
-            {relatedCase.id}
+      {sub.cases.map((c) => (
+        <div
+          key={c.id}
+          className="mb-5 rounded-xl border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-900"
+        >
+          ⚖ Linked to arbitration case{" "}
+          <Link href={`/dashboard/arbitration/${c.id}`} className="font-bold underline">
+            {c.id}
           </Link>{" "}
-          ({relatedCase.status.replaceAll("_", " ").toLowerCase()}).
+          ({c.status.replaceAll("_", " ").toLowerCase()}
+          {c.disputeType ? `, ${c.disputeType.replaceAll("_", " ").toLowerCase()}` : ""}
+          {c.finalVerdict ? `, verdict ${c.finalVerdict.replaceAll("_", " ").toLowerCase()}` : ""}
+          {c.openedAt ? `, opened ${formatDateTime(c.openedAt)}` : ""}).
         </div>
-      ) : null}
+      ))}
 
       <div className="grid gap-6 lg:grid-cols-5">
-        {/* payload */}
-        <Card className="lg:col-span-3">
-          <CardHeader title="Proposed lexical record" subtitle="Quick Input payload" />
-          <dl className="divide-y divide-slate-50 text-sm">
-            <div className="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-2 sm:px-5">
-              <dt className="text-slate-400">Written form</dt>
-              <dd className="font-bengali col-span-2 text-lg font-bold text-slate-900">
-                {sub.writtenForm}
-              </dd>
-            </div>
-            <div className="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-2 sm:px-5">
-              <dt className="text-slate-400">Part of speech</dt>
-              <dd className="col-span-2">
+        <div className="space-y-6 lg:col-span-3">
+          {/* core payload */}
+          <Card>
+            <CardHeader title="Proposed lexical record" subtitle="Quick Input payload" />
+            <dl className="divide-y divide-slate-50 text-sm">
+              <Row label="Written form">
+                <span className="font-bengali text-lg font-bold text-slate-900">{sub.writtenForm}</span>
+              </Row>
+              <Row label="Part of speech">
                 <PosBadge pos={sub.pos} />
-              </dd>
-            </div>
-            <div className="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-2 sm:px-5">
-              <dt className="text-slate-400">Synset linkage</dt>
-              <dd className="col-span-2">
-                {sub.synsetAction === "link" ? (
-                  <span className="flex flex-wrap items-center gap-2">
-                    Link to existing{" "}
-                    {sub.synsetId ? (
-                      <Link href={`/synset/${sub.synsetId}`}>
-                        <IdChip id={sub.synsetId} />
-                      </Link>
-                    ) : null}
-                    {synset ? (
-                      <span className="rounded bg-violet-50 px-1.5 py-0.5 font-mono text-[11px] text-violet-700 ring-1 ring-inset ring-violet-200">
-                        ILI {synset.ili}
-                      </span>
-                    ) : null}
-                  </span>
-                ) : (
-                  <span className="flex flex-wrap items-center gap-2">
-                    Create new concept
-                    <span className="rounded bg-violet-50 px-1.5 py-0.5 font-mono text-[11px] text-violet-700 ring-1 ring-inset ring-violet-200">
-                      ILI {sub.iliCode}
-                    </span>
-                  </span>
-                )}
-              </dd>
-            </div>
-            <div className="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-2 sm:px-5">
-              <dt className="text-slate-400">Definition</dt>
-              <dd className="col-span-2">
+              </Row>
+              <Row label="Definition">
                 {sub.definitionText ? (
                   <span className="font-bengali">
-                    <LangBadge lang={sub.definitionLanguage ?? "ben"} />{" "}
-                    {sub.definitionText}
+                    <LangBadge lang={sub.definitionLanguage ?? "ben"} /> {sub.definitionText}
                   </span>
-                ) : synset?.definition ? (
-                  <span className="font-bengali text-slate-500">
-                    <LangBadge lang={synset.definition.language} />{" "}
-                    {synset.definition.text}{" "}
-                    <em className="text-xs">(inherited from synset)</em>
+                ) : synset?.definitionText ? (
+                  <span className="font-bengali text-slate-600">
+                    <LangBadge lang={synset.definitionLanguage ?? "ben"} /> {synset.definitionText}{" "}
+                    <em className="text-xs text-slate-400">(inherited from linked synset)</em>
                   </span>
                 ) : (
                   <em className="text-slate-400">none provided</em>
                 )}
-              </dd>
-            </div>
-            <div className="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-2 sm:px-5">
-              <dt className="text-slate-400">Sense relations</dt>
-              <dd className="col-span-2 space-y-1">
-                {sub.senseRelations.length === 0 ? (
-                  <em className="text-slate-400">none</em>
-                ) : (
-                  sub.senseRelations.map((r, i) => (
-                    <span key={i} className="flex items-center gap-2 text-xs">
-                      <span className="rounded bg-slate-50 px-1.5 py-0.5 ring-1 ring-inset ring-slate-200">
-                        {REL_LABEL[r.relType] ?? r.relType}
-                      </span>
-                      <IdChip id={r.target} />
-                    </span>
-                  ))
-                )}
-              </dd>
-            </div>
-            <div className="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-2 sm:px-5">
-              <dt className="text-slate-400">Synset relations</dt>
-              <dd className="col-span-2 space-y-1">
-                {sub.synsetRelations.length === 0 ? (
-                  <em className="text-slate-400">none</em>
-                ) : (
-                  sub.synsetRelations.map((r, i) => (
-                    <span key={i} className="flex items-center gap-2 text-xs">
-                      <span className="rounded bg-slate-50 px-1.5 py-0.5 ring-1 ring-inset ring-slate-200">
-                        {REL_LABEL[r.relType] ?? r.relType}
-                      </span>
-                      <Link href={`/synset/${r.target}`}>
-                        <IdChip id={r.target} />
-                      </Link>
-                    </span>
-                  ))
-                )}
-              </dd>
-            </div>
-            {sub.reviewerNote ? (
-              <div className="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-2 sm:px-5">
-                <dt className="text-slate-400">Contributor note</dt>
-                <dd className="font-bengali col-span-2 text-slate-600">
-                  {sub.reviewerNote}
-                </dd>
-              </div>
-            ) : null}
-            {sub.validatedBy ? (
-              <div className="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-2 sm:px-5">
-                <dt className="text-slate-400">Validated by</dt>
-                <dd className="col-span-2 font-semibold text-emerald-700">
-                  {userById(sub.validatedBy)?.name} ·{" "}
-                  {sub.validatedAt ? formatDateTime(sub.validatedAt) : ""}
-                </dd>
-              </div>
-            ) : null}
-          </dl>
-        </Card>
+              </Row>
+              {sub.reviewerNote ? (
+                <Row label="Contributor note">
+                  <span className="font-bengali text-slate-600">{sub.reviewerNote}</span>
+                </Row>
+              ) : null}
+              {sub.validatedBy ? (
+                <Row label="Validated by">
+                  <span className="font-semibold text-emerald-700">
+                    {nameOf(sub.validatedBy)}
+                    {sub.validatedAt ? ` · ${formatDateTime(sub.validatedAt)}` : ""}
+                  </span>
+                </Row>
+              ) : null}
+            </dl>
+          </Card>
 
-        {/* history timeline */}
-        <Card className="lg:col-span-2">
+          {/* synset / concept */}
+          <Card>
+            <CardHeader
+              title="Synset (concept)"
+              subtitle={
+                sub.synsetAction === "link"
+                  ? "Links this word to an existing synset"
+                  : "Proposes a new synset for this word"
+              }
+            />
+            <dl className="divide-y divide-slate-50 text-sm">
+              {sub.synsetAction === "link" ? (
+                synset ? (
+                  <>
+                    <Row label="Synset">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <Link href={`/synset/${synset.id}`}>
+                          <IdChip id={synset.id} />
+                        </Link>
+                        {synset.pos ? <PosBadge pos={synset.pos} full={false} /> : null}
+                        {synset.ili ? <IliChip ili={synset.ili} /> : null}
+                      </span>
+                    </Row>
+                    <Row label="Gloss">
+                      {synset.definitionText ? (
+                        <span className="font-bengali">
+                          <LangBadge lang={synset.definitionLanguage ?? "ben"} /> {synset.definitionText}
+                        </span>
+                      ) : (
+                        <em className="text-slate-400">no gloss</em>
+                      )}
+                    </Row>
+                    <Row label="Existing members">
+                      {synset.members.length ? (
+                        <Members words={synset.members} />
+                      ) : (
+                        <em className="text-slate-400">none</em>
+                      )}
+                    </Row>
+                  </>
+                ) : (
+                  <Row label="Synset">
+                    <span className="text-rose-600">
+                      {sub.synsetId ? <IdChip id={sub.synsetId} /> : null} no longer exists in the lexicon.
+                    </span>
+                  </Row>
+                )
+              ) : (
+                <Row label="ILI code">
+                  {sub.iliCode && sub.iliCode.toLowerCase() !== "n/a" ? (
+                    <IliChip ili={sub.iliCode} />
+                  ) : (
+                    <span className="text-slate-500">N/A (no interlingual index)</span>
+                  )}
+                </Row>
+              )}
+              {iliWords || iliGloss ? (
+                <Row label="ILI record">
+                  <span className="space-y-0.5">
+                    {iliWords ? (
+                      <span className="block font-semibold text-slate-700">
+                        {iliWords.split(",").map((w) => w.trim()).filter(Boolean).join(", ")}
+                      </span>
+                    ) : null}
+                    {iliGloss ? (
+                      <span className="font-bengali block text-slate-500">{iliGloss}</span>
+                    ) : null}
+                  </span>
+                </Row>
+              ) : null}
+            </dl>
+          </Card>
+
+          {/* relations */}
+          <Card>
+            <CardHeader
+              title="Relations"
+              subtitle={`${sub.senseRelationDetails.length} sense · ${sub.synsetRelationDetails.length} synset`}
+            />
+            <div className="divide-y divide-slate-50 text-sm">
+              <div className="px-4 py-3 sm:px-5">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  Sense relations
+                </p>
+                {sub.senseRelationDetails.length === 0 ? (
+                  <em className="text-slate-400">none</em>
+                ) : (
+                  <ul className="space-y-2">
+                    {sub.senseRelationDetails.map((r, i) => (
+                      <li key={i} className="flex flex-wrap items-start gap-2">
+                        <span className="rounded bg-slate-50 px-1.5 py-0.5 text-xs ring-1 ring-inset ring-slate-200">
+                          {REL_LABEL[r.relType] ?? r.relType}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-2">
+                            {r.writtenForm ? (
+                              <span className="font-bengali font-semibold text-slate-800">{r.writtenForm}</span>
+                            ) : null}
+                            {r.pos ? <PosBadge pos={r.pos} full={false} /> : null}
+                            <IdChip id={r.target} />
+                            {!r.found ? <span className="text-xs text-rose-600">not found</span> : null}
+                          </span>
+                          {r.definition ? (
+                            <span className="font-bengali mt-0.5 block text-xs text-slate-500">{r.definition}</span>
+                          ) : null}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="px-4 py-3 sm:px-5">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  Synset relations
+                </p>
+                {sub.synsetRelationDetails.length === 0 ? (
+                  <em className="text-slate-400">none</em>
+                ) : (
+                  <ul className="space-y-2">
+                    {sub.synsetRelationDetails.map((r, i) => (
+                      <li key={i} className="flex flex-wrap items-start gap-2">
+                        <span className="rounded bg-slate-50 px-1.5 py-0.5 text-xs ring-1 ring-inset ring-slate-200">
+                          {REL_LABEL[r.relType] ?? r.relType}
+                        </span>
+                        <span className="min-w-0 flex-1 space-y-1">
+                          <span className="flex flex-wrap items-center gap-2">
+                            <Link href={`/synset/${r.target}`}>
+                              <IdChip id={r.target} />
+                            </Link>
+                            {r.pos ? <PosBadge pos={r.pos} full={false} /> : null}
+                            {r.ili ? <IliChip ili={r.ili} /> : null}
+                            {!r.found ? <span className="text-xs text-rose-600">not found</span> : null}
+                          </span>
+                          <Members words={r.members} />
+                          {r.definition ? (
+                            <span className="font-bengali block text-xs text-slate-500">{r.definition}</span>
+                          ) : null}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* workflow history — self-start keeps it content-sized rather than matching the left column */}
+        <Card className="self-start lg:col-span-2">
           <CardHeader
-            title="Lifecycle history"
-            subtitle="Immutable audit timeline (SRS §5.3)"
+            title="Workflow history"
+            subtitle={`${sub.history.length} state change${sub.history.length === 1 ? "" : "s"} · newest first · immutable audit trail`}
           />
-          <ol className="space-y-0 px-5 py-4">
-            {[...sub.history].reverse().map((h, i) => (
+          <ol className="px-5 py-4">
+            {history.map((h, i) => (
               <li key={i} className="relative pb-5 pl-6 last:pb-0">
-                {i < sub.history.length - 1 ? (
+                {i < history.length - 1 ? (
                   <span className="absolute top-3 left-[7px] h-full w-px bg-slate-200" />
                 ) : null}
                 <span
@@ -326,18 +527,36 @@ export default async function SubmissionDetailPage({
                         ? "bg-rose-500"
                         : h.to === "ARBITRATION"
                           ? "bg-purple-500"
-                          : "bg-slate-300"
+                          : i === 0
+                            ? "bg-slate-700"
+                            : "bg-slate-300"
                   }`}
                 />
-                <p className="text-xs font-bold text-slate-700">
-                  {h.from ? `${h.from} → ` : ""}
-                  {h.to}
+                <p className="flex flex-wrap items-center gap-1.5 text-xs font-bold text-slate-700">
+                  {h.from ? (
+                    <>
+                      <StateBadge state={h.from} />
+                      <span className="text-slate-400">→</span>
+                    </>
+                  ) : (
+                    <span className="text-slate-400">Created as</span>
+                  )}
+                  <StateBadge state={h.to} />
                 </p>
-                <p className="text-[11px] text-slate-400">
+                <p className="mt-1 text-[11px] text-slate-500">
                   {h.actorId === "system"
                     ? "System (automatic)"
-                    : `${userById(h.actorId)?.name ?? h.actorId} · ${h.actorRole === "SYSTEM" ? "system" : ROLE_LABEL[h.actorRole as keyof typeof ROLE_LABEL]}`}{" "}
-                  · {formatDateTime(h.timestamp)}
+                    : `${h.actorName ?? nameOf(h.actorId)} · ${
+                        h.actorRole === "SYSTEM"
+                          ? "system"
+                          : (ROLE_LABEL[h.actorRole as Role] ?? h.actorRole)
+                      }`}
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  {formatDateTime(h.timestamp)}
+                  {h.secondsInPreviousState != null && h.from
+                    ? ` · after ${formatDuration(h.secondsInPreviousState)} in ${stateLabel(h.from)}`
+                    : ""}
                 </p>
                 {h.comment ? (
                   <p className="font-bengali mt-1 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600">
@@ -362,6 +581,7 @@ export default async function SubmissionDetailPage({
               submissionId={sub.id}
               actions={actions}
               reviewers={reviewers}
+              assignedTo={sub.assignedTo}
             />
           </div>
         </Card>
