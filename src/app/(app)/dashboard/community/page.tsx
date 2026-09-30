@@ -34,7 +34,7 @@ export default async function CommunityPage({
     <div className="mx-auto max-w-3xl">
       <PageTitle
         title="Author Community Board"
-        subtitle="An internal space for authenticated authors to share short updates, blockers, milestones and rank changes (SRS §14). Not visible to Visitors."
+        subtitle="An internal space for authenticated authors to share short updates, blockers, milestones and rank changes. Not visible to Visitors."
         action={
           canModerate ? (
             <div className="flex gap-2">
@@ -119,7 +119,7 @@ export default async function CommunityPage({
         >
           author profile
         </Link>
-        . Reported posts are reviewed by the System Moderator (SRS §14.5).
+        . Reported posts are reviewed by the System Moderator.
       </p>
     </div>
   );

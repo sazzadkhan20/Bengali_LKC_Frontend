@@ -27,7 +27,7 @@ export default async function ExportPage() {
       <Card>
         <CardHeader
           title="Export configuration"
-          subtitle="Restricted to the Platform Architect and System Moderator (SRS §10.1)"
+          subtitle="Restricted to the Platform Architect and System Moderator"
         />
         <div className="p-5">
           <ExportPanel />
@@ -37,7 +37,7 @@ export default async function ExportPage() {
       <Card className="mt-6">
         <CardHeader
           title="Export audit log"
-          subtitle="Permanently retained — not deletable via the UI (SRS §10.4)"
+          subtitle="Permanently retained — not deletable via the UI"
         />
         <div className="thin-scroll overflow-x-auto">
           <table className="w-full min-w-[640px] text-left text-sm">

@@ -15,13 +15,13 @@ export default async function UsersPage() {
     <div className="mx-auto max-w-5xl">
       <PageTitle
         title="User Management"
-        subtitle="All role assignments are exclusively controlled by the Platform Architect (SRS §3.1). Suspended accounts are immediately locked and their login credentials frozen pending review."
+        subtitle="All role assignments are exclusively controlled by the Platform Architect. Suspended accounts are immediately locked and their login credentials frozen pending review."
       />
       <UsersManager />
       <p className="mt-3 text-xs text-slate-400">
         Suspension and reinstatement events are recorded in the tamper-evident
         audit trail. Entries submitted during a flagged burst remain UNDER_REVIEW
-        until cleared by a System Moderator (SRS §4.4).
+        until cleared by a System Moderator.
       </p>
     </div>
   );

@@ -194,7 +194,7 @@ export function ExportPanel() {
           ⇩ Generate & Download XML
         </a>
         <p className="self-center text-[11px] text-slate-400">
-          The download is SHA-256 hashed and permanently logged (SRS §10.4).
+          The download is SHA-256 hashed and permanently logged.
         </p>
       </div>
     </div>

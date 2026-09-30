@@ -95,7 +95,7 @@ export function ContributorDashboard({ session }: { session: Session }) {
             <p className="text-[11px] text-slate-400">
               Exceeding {store.config.suspensionThreshold} entries in any
               window triggers automatic account suspension pending Platform
-              Architect review (SRS §4.2).
+              Architect review.
             </p>
           </div>
         </Card>

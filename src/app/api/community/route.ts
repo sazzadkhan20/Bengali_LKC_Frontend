@@ -22,7 +22,7 @@ export async function POST(req: Request) {
   }
   if (text.length > 500) {
     return NextResponse.json(
-      { error: "Posts are limited to 500 characters (SRS §14.2)." },
+      { error: "Posts are limited to 500 characters." },
       { status: 422 }
     );
   }

@@ -27,7 +27,7 @@ export default async function SynsetDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const session = await getSession();
-  if (!session) redirect("/login"); // synset navigation is an authenticated feature (SRS §9.2)
+  if (!session) redirect("/login"); // synset navigation is an authenticated feature
 
   const { id } = await params;
   const synset = synsetById.get(id);

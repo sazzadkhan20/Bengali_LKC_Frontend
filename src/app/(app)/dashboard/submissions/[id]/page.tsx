@@ -18,6 +18,14 @@ import {
   ReviewActions,
   type ActionSpec,
 } from "@/components/dashboard/ReviewActions";
+import {
+  ReviewDecisionPanel,
+  type ReviewOptions,
+} from "@/components/dashboard/ReviewDecisionPanel";
+import {
+  OwnerActionsPanel,
+  type OwnerActions,
+} from "@/components/dashboard/OwnerActionsPanel";
 import type { EntryState, POS, Role, Session, Submission } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Submission" };
@@ -68,13 +76,29 @@ type SubmissionDetail = Omit<Submission, "history"> & {
     finalVerdict: string | null;
   }[];
   reviewers?: { id: string; name: string; role: Role }[];
+  /** Present when the caller's role has a server-side review policy. */
+  review?: ReviewOptions;
+  /** Present only for the entry's owner. */
+  ownerActions?: OwnerActions;
+  version?: number | null;
 };
 
-/** Compute the actions available to this user for this submission (SRS §5.2). */
-function actionsFor(session: Session, sub: Pick<Submission, "state" | "contributorId">): ActionSpec[] {
+const CASE_STAGE: Record<string, string> = {
+  RESPONSE_WINDOW: "waiting for the other party's response (72-hour window)",
+  ACTIVE: "under review by the arbitration panel",
+  TIE_PENDING: "awaiting a tie-break decision",
+};
+
+/** Staff actions for this user; the owner's own actions come from `ownerActions`. */
+function actionsFor(
+  session: Session,
+  sub: Pick<Submission, "state">,
+  hasReviewPolicy: boolean
+): ActionSpec[] {
   const role = session.role;
-  const isOwner = sub.contributorId === session.userId;
   const actions: ActionSpec[] = [];
+  // Review decisions for policy roles come from the review API instead.
+  if (hasReviewPolicy) return actions;
 
   if (sub.state === "PENDING_REVIEW" && hasPermission(role, "primary_validate")) {
     actions.push(
@@ -101,35 +125,6 @@ function actionsFor(session: Session, sub: Pick<Submission, "state" | "contribut
       minComment: 30,
       commentLabel: "Escalation notes",
     });
-  }
-  if (isOwner) {
-    if (sub.state === "DRAFT") {
-      actions.push(
-        { action: "submit_draft", label: "Submit for Review", tone: "green" },
-        { action: "delete_draft", label: "Delete Draft", tone: "red", confirm: "Delete this draft permanently?" }
-      );
-    }
-    if (["FLAGGED", "C_FLAGGED"].includes(sub.state)) {
-      actions.push({
-        action: "resubmit",
-        label: "↻ Resubmit after Correction",
-        tone: "green",
-        needsComment: false,
-      });
-    }
-    if (
-      ["REJECTED", "FLAGGED", "C_FLAGGED"].includes(sub.state) &&
-      hasPermission(role, "dispute")
-    ) {
-      actions.push({
-        action: "dispute",
-        label: "⚖ Dispute to Arbitration Panel",
-        tone: "purple",
-        needsComment: true,
-        minComment: 30,
-        commentLabel: "A dispute note",
-      });
-    }
   }
   if (sub.state === "UNDER_REVIEW" && hasPermission(role, "override_state")) {
     actions.push({
@@ -221,11 +216,19 @@ export default async function SubmissionDetailPage({
     userId ? (sub.users[userId]?.name ?? userId) : "";
 
   const synset = sub.synset;
-  const actions = actionsFor(session, sub);
+  const actions = actionsFor(session, sub, Boolean(sub.review));
+  const ownerActions = sub.ownerActions?.actions ?? [];
+  const activeCase = sub.ownerActions?.activeCase;
   const reviewers = sub.reviewers?.map((u) => ({
     id: u.id,
     name: `${u.name} (${ROLE_LABEL[u.role]})`,
   }));
+  const showReview = Boolean(
+    sub.review && (sub.review.blockedReason || sub.review.decisions.length > 0)
+  );
+  // Feedback banners address the contributor; reviewers read the same comments in the record and timeline.
+  const showFeedbackBanners =
+    session.role !== "LEXICAL_EDITOR" && session.role !== "CHIEF_LEXICAL_EDITOR";
   const history = [...sub.history].reverse();
   const iliWords = sub.iliInfo?.words?.trim() || null;
   const iliGloss =
@@ -282,27 +285,47 @@ export default async function SubmissionDetailPage({
         ))}
       </div>
 
+      {activeCase ? (
+        <Card className="mb-5">
+          <CardHeader title="Arbitration" subtitle="Your entry is under arbitration" />
+          <div className="space-y-1.5 p-5 text-sm text-purple-900">
+            <p>
+              ⚖ This entry is linked to arbitration case{" "}
+              <Link
+                href={`/dashboard/arbitration/${encodeURIComponent(activeCase.id)}`}
+                className="font-bold underline underline-offset-2 hover:text-purple-700"
+              >
+                {activeCase.id}
+              </Link>{" "}
+              (active).
+            </p>
+            {CASE_STAGE[activeCase.status] ? (
+              <p className="text-xs text-slate-500">
+                Current stage: {CASE_STAGE[activeCase.status]}. No action is needed from you until the
+                panel reaches a verdict.
+              </p>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
+
       {/* reviewer feedback banners */}
-      {sub.state === "FLAGGED" && sub.editorComment ? (
+      {showFeedbackBanners && sub.state === "FLAGGED" && sub.editorComment ? (
         <div className="font-bengali mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <strong>Lexical Editor comment:</strong> {sub.editorComment}
         </div>
       ) : null}
-      {sub.state === "C_FLAGGED" && sub.cleComment ? (
+      {showFeedbackBanners && sub.state === "C_FLAGGED" && sub.cleComment ? (
         <div className="font-bengali mb-5 rounded-xl border border-fuchsia-200 bg-fuchsia-50 px-4 py-3 text-sm text-fuchsia-900">
           <strong>Chief Lexical Editor note:</strong> {sub.cleComment}
-          <span className="mt-1 block text-xs text-fuchsia-600">
-            Both the Lexical Editor and the Contributor were notified
-            simultaneously (SRS §7.5.1).
-          </span>
         </div>
       ) : null}
-      {sub.state === "REJECTED" && sub.rejectionReason ? (
+      {showFeedbackBanners && sub.state === "REJECTED" && sub.rejectionReason ? (
         <div className="font-bengali mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
           <strong>Rejection reason:</strong> {sub.rejectionReason}
         </div>
       ) : null}
-      {sub.cases.map((c) => (
+      {sub.cases.filter((c) => c.id !== activeCase?.id).map((c) => (
         <div
           key={c.id}
           className="mb-5 rounded-xl border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-900"
@@ -347,6 +370,16 @@ export default async function SubmissionDetailPage({
               {sub.reviewerNote ? (
                 <Row label="Contributor note">
                   <span className="font-bengali text-slate-600">{sub.reviewerNote}</span>
+                </Row>
+              ) : null}
+              {sub.editorComment ? (
+                <Row label="Lexical Editor comment">
+                  <span className="font-bengali text-slate-700">{sub.editorComment}</span>
+                </Row>
+              ) : null}
+              {sub.cleComment ? (
+                <Row label="Chief Editor comment">
+                  <span className="font-bengali text-slate-700">{sub.cleComment}</span>
                 </Row>
               ) : null}
               {sub.validatedBy ? (
@@ -569,7 +602,31 @@ export default async function SubmissionDetailPage({
         </Card>
       </div>
 
-      {/* actions */}
+      {showReview && sub.review ? (
+        <Card className="mt-6">
+          <CardHeader
+            title="Review decision"
+            subtitle={`As ${ROLE_LABEL[session.role]} · entry is ${stateLabel(sub.state)}`}
+          />
+          <div className="p-5">
+            <ReviewDecisionPanel submissionId={sub.id} version={sub.version} options={sub.review} />
+          </div>
+        </Card>
+      ) : null}
+
+      {!activeCase && ownerActions.length > 0 ? (
+        <Card className="mt-6">
+          <CardHeader
+            title="Available actions"
+            subtitle={`Your entry is ${stateLabel(sub.state)}`}
+          />
+          <div className="p-5">
+            <OwnerActionsPanel submissionId={sub.id} version={sub.version} actions={ownerActions} />
+          </div>
+        </Card>
+      ) : null}
+
+      {/* staff actions */}
       {actions.length > 0 || reviewers ? (
         <Card className="mt-6">
           <CardHeader
