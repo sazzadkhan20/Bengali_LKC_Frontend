@@ -107,7 +107,7 @@ export function VotePanel({
       </button>
       <p className="text-[11px] text-slate-400">
         Your individual vote is never shown to contributors or editors — only
-        the final verdict and aggregated tally (SRS §7.6.1).
+        the final verdict and aggregated tally.
       </p>
     </div>
   );

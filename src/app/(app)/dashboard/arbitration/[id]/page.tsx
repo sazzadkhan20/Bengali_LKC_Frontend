@@ -178,7 +178,7 @@ export default async function ArbitrationCasePage({
             ) : (
               <p className="italic text-slate-400">
                 No response submitted within the 72-hour window. The absence is
-                noted in the case record (SRS §7.6.4).
+                noted in the case record.
               </p>
             )}
             {c.accusedId === session.userId && c.status === "RESPONSE_WINDOW" ? (
@@ -298,7 +298,7 @@ export default async function ArbitrationCasePage({
       {isCurator && excluded ? (
         <p className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           ⚠ Conflict of interest: you are a party to this case and have been
-          automatically excluded from voting (SRS §7.6.1).
+          automatically excluded from voting.
         </p>
       ) : null}
       {isCurator && myVote ? (

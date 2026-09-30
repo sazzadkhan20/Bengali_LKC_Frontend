@@ -1,86 +1,51 @@
-import Link from "next/link";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import { store } from "@/lib/store";
-import { formatDateTime } from "@/lib/format";
-import { Card, EmptyState, PageTitle, StateBadge } from "@/components/ui";
-import type { EntryState } from "@/lib/types";
+import { STATE_LABEL } from "@/lib/format";
+import { PageTitle } from "@/components/ui";
+import { ReviewHistoryBrowser } from "@/components/dashboard/ReviewHistoryBrowser";
+import type { EntryState, Role } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Review History" };
 
-export default async function HistoryPage() {
+/** Mirrors SubmissionBrowseService.HISTORY_EXCLUDED; the API enforces it. */
+const EXCLUDED: Partial<Record<Role, EntryState[]>> = {
+  LEXICAL_EDITOR: ["DRAFT", "PENDING_REVIEW"],
+  CHIEF_LEXICAL_EDITOR: ["DRAFT", "PENDING_REVIEW", "EDITOR_APPROVED", "FLAGGED"],
+};
+
+export default async function HistoryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ state?: string; q?: string }>;
+}) {
   const session = await getSession();
   if (!session) redirect("/login");
-  if (
-    !["LEXICAL_EDITOR", "CHIEF_LEXICAL_EDITOR"].includes(session.role)
-  )
-    redirect("/dashboard");
+  const excluded = EXCLUDED[session.role];
+  if (!excluded) redirect("/dashboard");
 
-  const decisions: {
-    submissionId: string;
-    word: string;
-    from: EntryState | null;
-    to: EntryState;
-    comment?: string;
-    timestamp: string;
-  }[] = [];
-  for (const s of store.submissions) {
-    for (const h of s.history) {
-      if (h.actorId === session.userId && h.from !== null) {
-        decisions.push({
-          submissionId: s.id,
-          word: s.writtenForm,
-          from: h.from,
-          to: h.to,
-          comment: h.comment,
-          timestamp: h.timestamp,
-        });
-      }
-    }
-  }
-  decisions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  const states = (Object.keys(STATE_LABEL) as EntryState[]).filter((s) => !excluded.includes(s));
+  const params = await searchParams;
+  const initialState = states.includes(params.state as EntryState)
+    ? (params.state as EntryState)
+    : undefined;
+  const initialQuery = typeof params.q === "string" ? params.q.slice(0, 100) : "";
+  const isEditor = session.role === "LEXICAL_EDITOR";
 
   return (
-    <div className="mx-auto max-w-4xl">
+    <div className="mx-auto max-w-6xl">
       <PageTitle
-        title={
-          session.role === "LEXICAL_EDITOR"
-            ? "My Review History"
-            : "My Validation History"
+        title={isEditor ? "My Review History" : "My Validation History"}
+        subtitle={
+          isEditor
+            ? "Entries you approved, flagged, rejected or disputed, with their current status. Newest decision first."
+            : "Entries you validated, C-flagged or disputed, with their current status. Newest decision first."
         }
-        subtitle="Every validation decision you have made, in reverse chronological order."
       />
-      {decisions.length === 0 ? (
-        <EmptyState title="No decisions yet" message="Your review actions will appear here." />
-      ) : (
-        <Card>
-          <ul className="divide-y divide-slate-50">
-            {decisions.map((d, i) => (
-              <li key={i} className="px-5 py-3.5">
-                <div className="flex flex-wrap items-center gap-3">
-                  <Link
-                    href={`/dashboard/submissions/${d.submissionId}`}
-                    className="font-bengali text-base font-bold text-slate-800 hover:text-emerald-700"
-                  >
-                    {d.word}
-                  </Link>
-                  <span className="text-xs text-slate-400">{d.from} →</span>
-                  <StateBadge state={d.to} />
-                  <span className="ml-auto text-xs text-slate-400">
-                    {formatDateTime(d.timestamp)}
-                  </span>
-                </div>
-                {d.comment ? (
-                  <p className="font-bengali mt-1 text-xs text-slate-500">
-                    💬 {d.comment}
-                  </p>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
+      <ReviewHistoryBrowser states={states} initialState={initialState} initialQuery={initialQuery} />
+      <p className="mt-3 text-xs text-slate-400">
+        Click any row to open the entry. Entries that are back in your review queue appear there instead.
+      </p>
     </div>
   );
 }

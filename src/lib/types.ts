@@ -311,7 +311,7 @@ export interface CommunityPost {
   text: string; // max 500 characters
   createdAt: string;
   reactions: PostReaction[];
-  replies: PostReply[]; // single flat level (SRS §14.2)
+  replies: PostReply[]; // single flat level
   reports: PostReport[];
   /** Hidden by a System Moderator after report review (SRS §14.5). */
   hidden: boolean;

@@ -37,7 +37,7 @@ export default async function AuditPage({
     <div className="mx-auto max-w-5xl">
       <PageTitle
         title="Audit Log"
-        subtitle="Immutable, tamper-evident trail of every state transition, credential event, account change, export and arbitration decision (SRS §5.3). Retained indefinitely."
+        subtitle="Immutable, tamper-evident trail of every state transition, credential event, account change, export and arbitration decision. Retained indefinitely."
         action={
           <div className="flex gap-2">
             <a

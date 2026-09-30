@@ -49,7 +49,7 @@ export default async function AuthorProfilePage({
     <div className="mx-auto max-w-3xl">
       <PageTitle
         title="Author Profile"
-        subtitle="Author information, current leaderboard rank and tier (SRS §14.2). Profile details are filled in by the Platform Architect at account creation."
+        subtitle="Author information, current leaderboard rank and tier. Profile details are filled in by the Platform Architect at account creation."
         action={
           <Link
             href="/dashboard/community"
@@ -149,7 +149,7 @@ export default async function AuthorProfilePage({
               </p>
               <p className="mt-0.5 text-xs text-slate-400">
                 The system posts on your behalf when you reach a new
-                leaderboard tier or a validated-entry milestone (SRS §14.2).
+                leaderboard tier or a validated-entry milestone.
               </p>
             </div>
             <AutoAnnounceToggle userId={author.id} enabled={author.autoAnnounce} />

@@ -25,7 +25,7 @@ export default async function CorrectionsPage() {
     <div className="mx-auto max-w-4xl">
       <PageTitle
         title="Pending Corrections"
-        subtitle="VALIDATED entries approved by the Arbitration panel with a correction note. Apply the minimal correction and confirm (SRS §7.6.4)."
+        subtitle="VALIDATED entries approved by the Arbitration panel with a correction note. Apply the minimal correction and confirm."
       />
 
       {pending.length === 0 ? (

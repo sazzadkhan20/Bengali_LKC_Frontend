@@ -183,7 +183,7 @@ export function ArchitectDashboard({ session }: { session: Session }) {
           </div>
           <p className="px-5 pb-4 text-[11px] leading-relaxed text-slate-400">
             Note: routine Quick Input use by the Platform Architect requires
-            Lexical Committee permission (SRS §3.3); emergency corrections are
+            Lexical Committee permission; emergency corrections are
             always available.
           </p>
         </Card>

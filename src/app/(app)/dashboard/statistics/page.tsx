@@ -24,7 +24,7 @@ const STATE_COLORS: Record<EntryState, string> = {
 
 export default async function StatisticsPage() {
   const session = await getSession();
-  if (!session) redirect("/login"); // authenticated roles only (SRS §8.2)
+  if (!session) redirect("/login"); // authenticated roles only
 
   const stats = lexiconStats();
   const counts = countsByState();

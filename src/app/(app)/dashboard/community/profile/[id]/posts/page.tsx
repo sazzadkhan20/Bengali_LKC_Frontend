@@ -29,7 +29,7 @@ export default async function AuthorPostsPage({
     <div className="mx-auto max-w-3xl">
       <PageTitle
         title={`Community Posts — ${author.name}`}
-        subtitle="This author's community post history, newest first (SRS §14.2)."
+        subtitle="This author's community post history, newest first."
         action={
           <Link
             href={`/dashboard/community/profile/${author.id}`}

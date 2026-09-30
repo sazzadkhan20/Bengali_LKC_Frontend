@@ -78,7 +78,7 @@ export default async function ArbitrationListPage() {
       {cases.length === 0 ? (
         <EmptyState
           title="No arbitration cases"
-          message="Disputes can be raised from REJECTED, FLAGGED or C-FLAGGED submissions; editors may escalate persistent disagreements."
+          message="Disputes can be raised from FLAGGED or C-FLAGGED submissions; editors may escalate persistent disagreements."
         />
       ) : (
         <div className="space-y-6">

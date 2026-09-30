@@ -70,7 +70,7 @@ export async function POST(
       const text = (p.text ?? "").trim();
       if (!text) return fail("Reply text is required.");
       if (text.length > 200)
-        return fail("Replies are limited to 200 characters (SRS §14.2).");
+        return fail("Replies are limited to 200 characters.");
       post.replies.push({
         id: `reply-${store.counters.reply++}`,
         authorId: session.userId,
@@ -161,7 +161,7 @@ export async function POST(
         action: "ACCOUNT_SUSPENDED",
         targetType: "USER",
         targetId: author.id,
-        detail: `${author.name} suspended over community post ${post.id} (SRS §14.5)`,
+        detail: `${author.name} suspended over community post ${post.id}`,
       });
       return NextResponse.json({ ok: true });
     }

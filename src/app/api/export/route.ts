@@ -23,7 +23,7 @@ export async function GET(req: Request) {
   const session = await getSession();
   if (!session || !hasPermission(session.role, "xml_export")) {
     return NextResponse.json(
-      { error: "XML export is restricted to the Platform Architect and System Moderator (SRS §10.1)." },
+      { error: "XML export is restricted to the Platform Architect and System Moderator." },
       { status: 403 }
     );
   }

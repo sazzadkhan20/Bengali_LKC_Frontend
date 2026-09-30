@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { z } from "zod";
-import { ILI_NOT_AVAILABLE, isIliNotAvailable } from "@/lib/ili";
-import type { Role } from "@/lib/types";
+import { ILI_NOT_AVAILABLE, isIliNotAvailable, normalizeIliCode } from "@/lib/ili";
+import Link from "next/link";
+import { POS_LABEL, STATE_LABEL } from "@/lib/format";
+import type { EntryState, POS, Role } from "@/lib/types";
 import { IliFinder } from "@/components/dashboard/IliFinder";
+import { StateBadge } from "@/components/ui";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 
 /* ------------------------------------------------------------------ */
 /* Generic autocomplete                                                */
@@ -228,25 +232,52 @@ function relationErrors(
   return out;
 }
 
-export function QuickInputForm({ role }: { role: Role }) {
+/** A FLAGGED / C_FLAGGED entry loaded into the form for correction and resubmission. */
+export interface ResubmissionSource {
+  id: string;
+  version: number | null;
+  state: "FLAGGED" | "C_FLAGGED";
+  targetState: EntryState;
+  feedback: string | null;
+  writtenForm: string;
+  pos: string;
+  synsetAction: "link" | "create";
+  synset: SynsetHit | null;
+  iliCode: string | null;
+  definitionLanguage: "ben" | "eng";
+  definitionText: string;
+  reviewerNote: string;
+  senseRelations: RelRow[];
+  synsetRelations: RelRow[];
+}
+
+export function QuickInputForm({
+  role,
+  resubmission,
+}: {
+  role: Role;
+  resubmission?: ResubmissionSource;
+}) {
   const router = useRouter();
   const [mountedAt] = useState(() => Date.now());
   const mountedAtRef = useRef(mountedAt);
   /** Same key for retries / double-clicks of one entry; renewed only after a successful submit. */
   const idempotencyKeyRef = useRef<string | null>(null);
+  const src = resubmission;
 
-  const [word, setWord] = useState("");
-  const [pos, setPos] = useState("n");
-  const [synsetAction, setSynsetAction] = useState<"link" | "create">("link");
-  const [selectedSynset, setSelectedSynset] = useState<SynsetHit | null>(null);
-  const [ili, setIli] = useState("");
+  const [word, setWord] = useState(src?.writtenForm ?? "");
+  const [pos, setPos] = useState(src?.pos ?? "n");
+  const [synsetAction, setSynsetAction] = useState<"link" | "create">(src?.synsetAction ?? "link");
+  const [selectedSynset, setSelectedSynset] = useState<SynsetHit | null>(src?.synset ?? null);
+  const [ili, setIli] = useState(normalizeIliCode(src?.iliCode));
   /** After “Use this code”, the finder is hidden until Discard. */
-  const [iliPicked, setIliPicked] = useState(false);
-  const [defLang, setDefLang] = useState<"ben" | "eng">("ben");
-  const [defText, setDefText] = useState("");
-  const [senseRels, setSenseRels] = useState<RelRow[]>([]);
-  const [synsetRels, setSynsetRels] = useState<RelRow[]>([]);
-  const [note, setNote] = useState("");
+  const [iliPicked, setIliPicked] = useState(Boolean(src?.iliCode));
+  const [defLang, setDefLang] = useState<"ben" | "eng">(src?.definitionLanguage ?? "ben");
+  const [defText, setDefText] = useState(src?.definitionText ?? "");
+  const [senseRels, setSenseRels] = useState<RelRow[]>(src?.senseRelations ?? []);
+  const [synsetRels, setSynsetRels] = useState<RelRow[]>(src?.synsetRelations ?? []);
+  const [note, setNote] = useState(src?.reviewerNote ?? "");
+  const [resubmitted, setResubmitted] = useState<{ id: string; state: EntryState } | null>(null);
   const [captcha, setCaptcha] = useState(false);
   const [honeypot, setHoneypot] = useState("");
   const [directApprove, setDirectApprove] = useState(false);
@@ -257,11 +288,41 @@ export function QuickInputForm({ role }: { role: Role }) {
   const [serverErrors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
+  const [pending, setPending] = useState<{
+    kind: "submit" | "draft" | "resubmit";
+    entry: Record<string, unknown>;
+  } | null>(null);
 
   const isModerator =
     role === "SYSTEM_MODERATOR" || role === "PLATFORM_ARCHITECT";
   const lockedDefinition =
     synsetAction === "link" && selectedSynset?.definition ? true : false;
+
+  /** Resubmission only: whether any field differs from the loaded entry (mirrors the server's change check). */
+  const hasChanges = useMemo(() => {
+    if (!src) return true;
+    const relKey = (rows: RelRow[]) =>
+      rows
+        .filter((r) => r.target)
+        .map((r) => `${r.relType}|${r.target}`)
+        .sort()
+        .join(",");
+    const definition = lockedDefinition ? "" : defText.trim();
+    const initialDefinition = src.definitionText.trim();
+    return (
+      word.trim() !== src.writtenForm.trim() ||
+      pos !== src.pos ||
+      synsetAction !== src.synsetAction ||
+      (synsetAction === "link" && (selectedSynset?.id ?? "") !== (src.synset?.id ?? "")) ||
+      (synsetAction === "create" &&
+        normalizeIliCode(ili).toLowerCase() !== normalizeIliCode(src.iliCode).toLowerCase()) ||
+      definition !== initialDefinition ||
+      (definition !== "" && defLang !== src.definitionLanguage) ||
+      relKey(senseRels) !== relKey(src.senseRelations) ||
+      relKey(synsetRels) !== relKey(src.synsetRelations) ||
+      note.trim() !== src.reviewerNote.trim()
+    );
+  }, [src, word, pos, synsetAction, selectedSynset, ili, defText, defLang, lockedDefinition, senseRels, synsetRels, note]);
 
   const debouncedWord = useDebounced(word.trim(), 400);
   const debouncedIli = useDebounced(ili.trim(), 400);
@@ -364,6 +425,7 @@ export function QuickInputForm({ role }: { role: Role }) {
               : debouncedIli
             : undefined,
         confirmNearDuplicate: confirmNearDup,
+        excludeSubmissionId: src?.id,
       }),
     })
       .then((r) => r.json())
@@ -398,10 +460,11 @@ export function QuickInputForm({ role }: { role: Role }) {
     selectedSynset,
     confirmNearDup,
     clientErrors.writtenForm,
+    src?.id,
   ]);
 
-  async function submit(saveAsDraft: boolean) {
-    setBusy(true);
+  /** Validates the form; returns the payload, or null after showing the errors. */
+  function prepare(saveAsDraft: boolean): Record<string, unknown> | null {
     setSuccess(null);
 
     const client = quickInputClientSchema.safeParse({
@@ -455,10 +518,55 @@ export function QuickInputForm({ role }: { role: Role }) {
     }
     if (Object.keys(preErrors).length > 0) {
       setErrors(preErrors);
-      setBusy(false);
-      return;
+      return null;
     }
 
+    return {
+      writtenForm: word.trim(),
+      pos,
+      synsetAction,
+      synsetId: synsetAction === "link" ? selectedSynset?.id : undefined,
+      iliCode:
+        synsetAction === "create"
+          ? isIliNotAvailable(ili)
+            ? ILI_NOT_AVAILABLE
+            : ili.trim()
+          : undefined,
+      definitionLanguage: defLang,
+      definitionText: lockedDefinition ? undefined : defText.trim() || undefined,
+      senseRelations: senseRels
+        .filter((r) => r.target)
+        .map((r) => ({ relType: r.relType, target: r.target })),
+      synsetRelations: synsetRels
+        .filter((r) => r.target)
+        .map((r) => ({ relType: r.relType, target: r.target })),
+      reviewerNote: note.trim() || undefined,
+    };
+  }
+
+  /** Validates, then asks for confirmation before anything is sent. */
+  function requestSubmit(saveAsDraft: boolean) {
+    const entry = prepare(saveAsDraft);
+    if (!entry) return;
+    setPending({ kind: src ? "resubmit" : saveAsDraft ? "draft" : "submit", entry });
+  }
+
+  async function confirmPending() {
+    if (!pending) return;
+    const { kind, entry } = pending;
+    setBusy(true);
+    try {
+      if (kind === "resubmit") {
+        await resubmit(entry);
+      } else {
+        await submit(entry, kind === "draft");
+      }
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function submit(entry: Record<string, unknown>, saveAsDraft: boolean) {
     idempotencyKeyRef.current ??= newIdempotencyKey();
     try {
       const res = await fetch("/api/submissions", {
@@ -469,25 +577,7 @@ export function QuickInputForm({ role }: { role: Role }) {
           "Idempotency-Key": idempotencyKeyRef.current,
         },
         body: JSON.stringify({
-          writtenForm: word.trim(),
-          pos,
-          synsetAction,
-          synsetId: synsetAction === "link" ? selectedSynset?.id : undefined,
-          iliCode:
-            synsetAction === "create"
-              ? isIliNotAvailable(ili)
-                ? ILI_NOT_AVAILABLE
-                : ili.trim()
-              : undefined,
-          definitionLanguage: defLang,
-          definitionText: lockedDefinition ? undefined : defText.trim() || undefined,
-          senseRelations: senseRels
-            .filter((r) => r.target)
-            .map((r) => ({ relType: r.relType, target: r.target })),
-          synsetRelations: synsetRels
-            .filter((r) => r.target)
-            .map((r) => ({ relType: r.relType, target: r.target })),
-          reviewerNote: note.trim() || undefined,
+          ...entry,
           honeypot,
           elapsedSeconds: (Date.now() - mountedAtRef.current) / 1000,
           captchaPassed: captcha,
@@ -515,10 +605,10 @@ export function QuickInputForm({ role }: { role: Role }) {
           : saveAsDraft
           ? `Saved as draft (${data.id}). You can edit it from My Submissions.`
           : data.state === "VALIDATED"
-            ? `Entry ${data.id} submitted and directly VALIDATED.`
+            ? `Entry ${data.id} submitted and marked Validated.`
             : data.state === "UNDER_REVIEW"
-              ? `Entry ${data.id} held UNDER_REVIEW (anti-bot timing). A System Moderator will clear it.`
-              : `Entry ${data.id} submitted — now in PENDING_REVIEW.`
+              ? `Entry ${data.id} is held Under Review for a security check. A System Moderator will clear it shortly.`
+              : `Entry ${data.id} submitted — it is now Pending Review in the Lexical Editor's queue.`
       );
       setWord("");
       setSelectedSynset(null);
@@ -534,10 +624,89 @@ export function QuickInputForm({ role }: { role: Role }) {
       setJustification("");
       mountedAtRef.current = Date.now();
       router.refresh();
+    } catch {
+      setErrors({ form: "Network error — the entry was not submitted. Please try again." });
     } finally {
       setBusy(false);
     }
   }
+
+  async function resubmit(entry: Record<string, unknown>) {
+    if (!src) return;
+    try {
+      const res = await fetch(`/api/submissions/${encodeURIComponent(src.id)}/resubmit`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...entry,
+          captchaPassed: captcha,
+          confirmNearDuplicate: confirmNearDup,
+          expectedVersion: src.version ?? undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data.nearDuplicate) {
+        setNearDupMessage(data.nearDuplicate);
+        return;
+      }
+      if (!res.ok) {
+        setErrors(data.errors ?? { form: data.error ?? "Resubmission failed. Please try again." });
+        return;
+      }
+      setErrors({});
+      setNearDupMessage(null);
+      setResubmitted({ id: data.id ?? src.id, state: data.state ?? src.targetState });
+    } catch {
+      setErrors({ form: "Network error — the entry was not resubmitted. Please try again." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const cancelPending = useCallback(() => setPending(null), []);
+
+  const confirmCopy = ((): {
+    title: string;
+    description: string;
+    confirmLabel: string;
+    toState: EntryState;
+  } => {
+    const who = word.trim() ? `“${word.trim()}”` : "This entry";
+    if (pending?.kind === "resubmit" && src) {
+      const toChief = src.targetState === "EDITOR_APPROVED";
+      return {
+        title: "Resubmit this entry?",
+        description: `${who} will be resubmitted with your corrections. Its status will change to ${STATE_LABEL[src.targetState]} and it goes back to ${
+          toChief ? "the Chief Lexical Editor for final review" : "the Lexical Editor's review queue"
+        }.`,
+        confirmLabel: "Yes, resubmit",
+        toState: src.targetState,
+      };
+    }
+    if (pending?.kind === "draft") {
+      return {
+        title: "Save as draft?",
+        description: `${who} will be saved as a Draft. It is not sent for review until you submit it from My Submissions.`,
+        confirmLabel: "Save draft",
+        toState: "DRAFT",
+      };
+    }
+    if (isModerator && directApprove) {
+      return {
+        title: "Submit and validate directly?",
+        description: `${who} will be added and marked Validated immediately, skipping the review queues. Your justification is recorded in the audit trail.`,
+        confirmLabel: "Submit & validate",
+        toState: "VALIDATED",
+      };
+    }
+    return {
+      title: "Submit for review?",
+      description: `${who} will be submitted for review. Its status will be Pending Review and it will wait in the Lexical Editor's review queue. You can follow its progress in My Submissions.`,
+      confirmLabel: "Yes, submit for review",
+      toState: "PENDING_REVIEW",
+    };
+  })();
 
   const fieldError = (key: string) =>
     errors[key] ? (
@@ -549,15 +718,87 @@ export function QuickInputForm({ role }: { role: Role }) {
       ? "border-rose-400 focus:border-rose-500 focus:ring-rose-200"
       : "border-slate-300 focus:border-emerald-500 focus:ring-emerald-200";
 
+  if (resubmitted) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-800">
+          <p className="font-bold">✓ Entry {resubmitted.id} resubmitted.</p>
+          <p className="mt-1">
+            Status changed to {STATE_LABEL[resubmitted.state] ?? resubmitted.state}
+            {resubmitted.state === "EDITOR_APPROVED"
+              ? " — it is back with the Chief Lexical Editor for final review."
+              : " — it is back in the Lexical Editor review queue."}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-3 text-sm font-semibold">
+          <Link
+            href={`/dashboard/submissions/${encodeURIComponent(resubmitted.id)}`}
+            className="rounded-xl bg-emerald-700 px-5 py-2.5 text-white shadow-sm hover:bg-emerald-800"
+          >
+            View entry
+          </Link>
+          <Link
+            href="/dashboard/submissions"
+            className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-slate-700 hover:bg-slate-50"
+          >
+            My submissions
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form
       className="space-y-6"
       onSubmit={(e) => {
         e.preventDefault();
-        submit(false);
+        if (busy || (src && !hasChanges)) return;
+        requestSubmit(false);
       }}
     >
+      <ConfirmModal
+        open={pending !== null}
+        title={confirmCopy.title}
+        description={confirmCopy.description}
+        confirmLabel={confirmCopy.confirmLabel}
+        tone="primary"
+        busy={busy}
+        onConfirm={confirmPending}
+        onCancel={cancelPending}
+      >
+        <dl className="grid grid-cols-3 gap-x-3 gap-y-1.5 rounded-xl bg-slate-50 px-4 py-3 text-sm ring-1 ring-inset ring-slate-200">
+          <dt className="text-slate-400">Word</dt>
+          <dd className="font-bengali col-span-2 font-bold text-slate-900">{word.trim()}</dd>
+          <dt className="text-slate-400">Part of speech</dt>
+          <dd className="col-span-2 text-slate-700">{POS_LABEL[pos as POS] ?? pos}</dd>
+          <dt className="text-slate-400">New status</dt>
+          <dd className="col-span-2">
+            <StateBadge state={confirmCopy.toState} />
+          </dd>
+        </dl>
+      </ConfirmModal>
+      {src ? (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+          <p className="font-semibold">
+            ↻ Resubmitting entry <code className="font-mono">{src.id}</code> ·{" "}
+            {STATE_LABEL[src.state] ?? src.state}
+          </p>
+          {src.feedback ? (
+            <p className="font-bengali mt-1.5">
+              <span className="font-semibold">
+                {src.state === "C_FLAGGED" ? "Chief Lexical Editor note" : "Lexical Editor comment"}:
+              </span>{" "}
+              {src.feedback}
+            </p>
+          ) : null}
+          <p className="mt-1.5 text-xs text-sky-800">
+            After resubmission the entry returns to{" "}
+            <strong>{STATE_LABEL[src.targetState] ?? src.targetState}</strong>. Resubmit becomes
+            available once you edit the entry.
+          </p>
+        </div>
+      ) : null}
       {success ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
           ✓ {success}
@@ -867,8 +1108,7 @@ export function QuickInputForm({ role }: { role: Role }) {
             <div className="font-bengali rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm text-slate-600">
               🔒 {selectedSynset?.definition}
               <span className="mt-1 block text-[11px] text-slate-400">
-                The selected synset already has a definition — field locked
-                (SRS §6.2).
+                The selected synset already has a definition — field locked.
               </span>
             </div>
           ) : (
@@ -1102,7 +1342,7 @@ export function QuickInputForm({ role }: { role: Role }) {
       </div>
 
       {/* SM direct approval */}
-      {isModerator ? (
+      {isModerator && !src ? (
         <div className="rounded-2xl border border-purple-200 bg-purple-50/60 p-5">
           <label className="flex items-center gap-2 text-sm font-bold text-purple-900">
             <input
@@ -1170,6 +1410,24 @@ export function QuickInputForm({ role }: { role: Role }) {
         </label>
       ) : null}
 
+      {src ? (
+        <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
+          <button
+            type="submit"
+            disabled={busy || !hasChanges}
+            title={hasChanges ? undefined : "Edit the entry to enable Resubmit"}
+            className="rounded-xl bg-emerald-700 px-7 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-emerald-700"
+          >
+            {busy ? "Resubmitting…" : "↻ Resubmit"}
+          </button>
+          <Link
+            href={`/dashboard/submissions/${encodeURIComponent(src.id)}`}
+            className="rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            Cancel
+          </Link>
+        </div>
+      ) : (
       <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
         <button
           type="submit"
@@ -1185,16 +1443,17 @@ export function QuickInputForm({ role }: { role: Role }) {
         <button
           type="button"
           disabled={busy}
-          onClick={() => submit(true)}
+          onClick={() => requestSubmit(true)}
           className="rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
         >
           Save as Draft
         </button>
         <p className="text-[11px] text-slate-400">
           Server checks: honeypot → timing (too fast → UNDER_REVIEW) → CAPTCHA →
-          duplicate detection (SRS §6.2).
+          duplicate detection.
         </p>
       </div>
+      )}
     </form>
   );
 }

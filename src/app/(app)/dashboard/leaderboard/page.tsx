@@ -115,7 +115,7 @@ export default async function LeaderboardPage({
       <div className="mx-auto max-w-5xl">
         <PageTitle
           title="Leader Board"
-          subtitle={`Independent ${ROLE_LABEL[session.role]} leaderboard. A reward point (${c.rewardPointPerEntry} per entry) is credited only when an entry reaches VALIDATED (SRS §7.8).`}
+          subtitle={`Independent ${ROLE_LABEL[session.role]} leaderboard. A reward point (${c.rewardPointPerEntry} per entry) is credited only when an entry reaches VALIDATED.`}
         />
 
         {me ? (
@@ -181,7 +181,7 @@ export default async function LeaderboardPage({
     <div className="mx-auto max-w-5xl">
       <PageTitle
         title="Leader Board"
-        subtitle="Read-only view of all three role leaderboards. Your role does not earn points and is not ranked (SRS §7.8)."
+        subtitle="Read-only view of all three role leaderboards. Your role does not earn points and is not ranked."
       />
 
       <div className="mb-4 flex flex-wrap gap-1.5">

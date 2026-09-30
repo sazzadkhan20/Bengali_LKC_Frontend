@@ -17,7 +17,7 @@ export default async function ConfigPage() {
     <div className="mx-auto max-w-4xl">
       <PageTitle
         title="System Configuration & Anti-Bot Controls"
-        subtitle="Rate limits, CAPTCHA, honeypots, timing analysis and session policy (SRS §4). Every change is written to the audit trail."
+        subtitle="Rate limits, CAPTCHA, honeypots, timing analysis and session policy. Every change is written to the audit trail."
       />
       <ConfigForm initial={{ ...store.config }} />
 
@@ -49,7 +49,7 @@ export default async function ConfigPage() {
       <Card className="mt-6">
         <CardHeader
           title="ILI Registry"
-          subtitle="Local Princeton WordNet 2.1 offset cache used for real-time Quick Input validation (SRS §13.2)"
+          subtitle="Local Princeton WordNet 2.1 offset cache used for real-time Quick Input validation"
         />
         <div className="flex flex-wrap items-center gap-4 p-5 text-sm">
           <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200">
@@ -58,7 +58,7 @@ export default async function ConfigPage() {
           <span className="text-xs text-slate-400">
             Last refreshed with the canonical lexicon import. The framework
             never creates or modifies ILI codes; unmatched codes are flagged
-            for UKC curation (SRS §13.3).
+            for UKC curation.
           </span>
         </div>
       </Card>

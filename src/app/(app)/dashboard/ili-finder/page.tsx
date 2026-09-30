@@ -17,7 +17,7 @@ export default async function IliFinderPage() {
     <div className="mx-auto max-w-3xl">
       <PageTitle
         title="ILI Finder"
-        subtitle={`Look up Princeton WordNet ${registry.version} Inter-Lingual Index codes by English word and part of speech. Use this when creating a new synset in Quick Input (SRS §13.2).`}
+        subtitle={`Look up Princeton WordNet ${registry.version} Inter-Lingual Index codes by English word and part of speech. Use this when creating a new synset in Quick Input.`}
       />
 
       <Card className="p-6">
