@@ -21,6 +21,7 @@ interface SynsetHit {
   pos: string;
   definition?: string;
   words: string[];
+  origin?: string;
 }
 interface WordHit {
   senseId: string;
@@ -28,6 +29,7 @@ interface WordHit {
   lemma: string;
   pos: string;
   definition?: string;
+  origin?: string;
 }
 
 /** randomUUID is only available on HTTPS / localhost; fall back to getRandomValues elsewhere. */
@@ -46,6 +48,17 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
+function NewBadge({ origin }: { origin?: string }) {
+  return origin === "USER" ? (
+    <span
+      title="Added through the platform after validation"
+      className="rounded bg-sky-50 px-1 text-[10px] font-bold uppercase text-sky-700 ring-1 ring-inset ring-sky-200"
+    >
+      New
+    </span>
+  ) : null;
+}
+
 function Autocomplete<T>({
   placeholder,
   endpoint,
@@ -55,6 +68,8 @@ function Autocomplete<T>({
   selectedLabel,
   onClear,
   posFilter,
+  disabledReason,
+  invalid = false,
 }: {
   placeholder: string;
   endpoint: string;
@@ -65,6 +80,9 @@ function Autocomplete<T>({
   onClear?: () => void;
   /** Optional POS filter forwarded to the lookup API */
   posFilter?: string;
+  /** Why a result cannot be picked (e.g. already used in another row), or null. */
+  disabledReason?: (item: T) => string | null;
+  invalid?: boolean;
 }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
@@ -111,14 +129,22 @@ function Autocomplete<T>({
 
   if (selectedLabel) {
     return (
-      <div className="flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2.5">
-        <span className="font-bengali min-w-0 flex-1 truncate text-sm font-semibold text-emerald-900">
+      <div
+        className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 ${
+          invalid ? "border-red-300 bg-red-50" : "border-emerald-300 bg-emerald-50"
+        }`}
+      >
+        <span
+          className={`font-bengali min-w-0 flex-1 truncate text-sm font-semibold ${
+            invalid ? "text-red-900" : "text-emerald-900"
+          }`}
+        >
           {selectedLabel}
         </span>
         <button
           type="button"
           onClick={onClear}
-          className="text-xs font-bold text-emerald-700 hover:text-rose-600"
+          className="text-xs font-bold text-emerald-700 hover:text-red-600"
         >
           ✕ change
         </button>
@@ -133,28 +159,43 @@ function Autocomplete<T>({
         onChange={(e) => setQ(e.target.value)}
         onFocus={() => visibleHits.length > 0 && setOpen(true)}
         placeholder={placeholder}
-        className="font-bengali w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+        aria-invalid={invalid || undefined}
+        className={`font-bengali w-full rounded-xl border px-3 py-2.5 text-sm outline-none transition focus:ring-2 ${
+          invalid
+            ? "border-red-400 focus:border-red-500 focus:ring-red-200"
+            : "border-slate-300 focus:border-emerald-500 focus:ring-emerald-200"
+        }`}
       />
       {loading && queryReady ? (
         <p className="mt-1 text-[11px] text-slate-400">Searching lexicon…</p>
       ) : null}
       {open && visibleHits.length > 0 ? (
         <ul className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
-          {visibleHits.map((h) => (
-            <li key={keyOf(h)}>
-              <button
-                type="button"
-                onClick={() => {
-                  onSelect(h);
-                  setOpen(false);
-                  setQ("");
-                }}
-                className="block w-full px-3 py-2.5 text-left text-sm transition hover:bg-emerald-50"
-              >
-                {render(h)}
-              </button>
-            </li>
-          ))}
+          {visibleHits.map((h) => {
+            const reason = disabledReason?.(h) ?? null;
+            return (
+              <li key={keyOf(h)}>
+                <button
+                  type="button"
+                  disabled={reason !== null}
+                  title={reason ?? undefined}
+                  onClick={() => {
+                    onSelect(h);
+                    setOpen(false);
+                    setQ("");
+                  }}
+                  className="block w-full px-3 py-2.5 text-left text-sm transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-60 disabled:hover:bg-slate-50"
+                >
+                  {render(h)}
+                  {reason ? (
+                    <span className="mt-0.5 block text-[11px] font-semibold text-red-600">
+                      {reason}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
       {open && queryReady && !loading && visibleHits.length === 0 ? (
@@ -165,7 +206,7 @@ function Autocomplete<T>({
 }
 
 /* ------------------------------------------------------------------ */
-/* Quick Input form (SRS §6.2)                                         */
+/* Validation — mirrors the backend EntryValidator rule for rule       */
 /* ------------------------------------------------------------------ */
 
 const SENSE_REL_TYPES = ["derivation", "antonym", "metonym"] as const;
@@ -177,59 +218,166 @@ const SYNSET_REL_TYPES = [
   "attribute",
 ] as const;
 
+const WORD_MAX = 25;
+const DEFINITION_MIN = 5;
+const DEFINITION_MAX = 500;
+const NOTE_MAX = 500;
+const RELATIONS_MAX = 20;
+
 const BENGALI_RE = /[\u0980-\u09ff]/;
+const LATIN_RE = /[A-Za-z]/;
+const WORD_ALLOWED_RE = /^[\u0981-\u09E3\u09F0\u09F1\u09FC\u09FE\u200C\u200D \-]+$/;
+const WORD_START_RE = /^[\u0985-\u09B9\u09CE\u09DC-\u09E1\u09F0\u09F1]/;
 const ILI_RE = /^\d{8}-[nvar]$/;
 
-const quickInputClientSchema = z.object({
-  writtenForm: z
-    .string()
-    .trim()
-    .min(1, "Bengali word is required.")
-    .max(25, "Maximum 25 characters allowed.")
-    .refine((v) => BENGALI_RE.test(v), {
-      message: "Must contain at least one Bengali Unicode character (U+0980–U+09FF).",
+const POS_NAME: Record<string, string> = { n: "noun", v: "verb", a: "adjective", r: "adverb" };
+
+const codePoints = (s: string) => Array.from(s).length;
+const cleanWord = (s: string) => s.trim().replace(/\s+/g, " ");
+
+const relationRow = z.object({ relType: z.string(), target: z.string() });
+
+const quickInputSchema = z
+  .object({
+    writtenForm: z.string(),
+    pos: z.enum(["n", "v", "a", "r"], { message: "Select a part of speech." }),
+    synsetAction: z.enum(["link", "create"], {
+      message: "Choose to link an existing synset or create a new one.",
     }),
-  pos: z.enum(["n", "v", "a", "r"], { message: "Part of speech is required." }),
-  synsetAction: z.enum(["link", "create"]),
-  definitionText: z.string().max(500, "Definition must be at most 500 characters.").optional(),
-  reviewerNote: z.string().max(500, "Note must be at most 500 characters.").optional(),
-});
+    synsetId: z.string().optional(),
+    synsetPos: z.string().optional(),
+    iliCode: z.string().optional(),
+    definitionLocked: z.boolean(),
+    definitionLanguage: z.enum(["ben", "eng"], { message: "Select the definition language." }),
+    definitionText: z.string(),
+    reviewerNote: z
+      .string()
+      .refine((v) => codePoints(v.trim()) <= NOTE_MAX, `Note must be at most ${NOTE_MAX} characters.`),
+    senseRelations: z
+      .array(relationRow)
+      .max(RELATIONS_MAX, `At most ${RELATIONS_MAX} sense relations are allowed per entry.`),
+    synsetRelations: z
+      .array(relationRow)
+      .max(RELATIONS_MAX, `At most ${RELATIONS_MAX} synset relations are allowed per entry.`),
+  })
+  .superRefine((v, ctx) => {
+    const add = (path: (string | number)[], message: string) =>
+      ctx.addIssue({ code: "custom", path, message });
+
+    const word = cleanWord(v.writtenForm);
+    if (!word) add(["writtenForm"], "Bengali word is required.");
+    else if (!WORD_ALLOWED_RE.test(word))
+      add(["writtenForm"], "Use Bengali letters only — digits, English letters and symbols are not allowed.");
+    else if (!WORD_START_RE.test(word))
+      add(["writtenForm"], "The word must start with a Bengali letter, not a vowel sign or mark.");
+    else if (/^-|-$|--| -|- /.test(word))
+      add(["writtenForm"], "A hyphen may only join two parts of the word.");
+    else if (codePoints(word) > WORD_MAX)
+      add(["writtenForm"], `Maximum ${WORD_MAX} characters allowed.`);
+
+    if (v.synsetAction === "link") {
+      if (!v.synsetId) add(["synsetId"], "Search and select an existing synset.");
+      else if (v.synsetPos && v.synsetPos !== v.pos)
+        add(
+          ["synsetId"],
+          `POS mismatch: the selected synset is ${POS_NAME[v.synsetPos] ?? v.synsetPos} but the word is ${POS_NAME[v.pos]}.`
+        );
+    } else {
+      const ili = (v.iliCode ?? "").trim().toLowerCase();
+      if (!ili) add(["iliCode"], "Enter an ILI code or select N/A.");
+      else if (!isIliNotAvailable(ili) && !ILI_RE.test(ili))
+        add(
+          ["iliCode"],
+          "ILI code must follow the format {8-digit-offset}-{n|v|a|r}, e.g. 04192858-n — or select N/A."
+        );
+      else if (!isIliNotAvailable(ili) && !ili.endsWith(`-${v.pos}`))
+        add(
+          ["iliCode"],
+          `The ILI code's POS suffix (-${ili.slice(-1)}) must match the selected part of speech (-${v.pos}).`
+        );
+    }
+
+    const def = v.definitionText.trim();
+    if (!v.definitionLocked && def) {
+      const len = codePoints(def);
+      if (len < DEFINITION_MIN)
+        add(["definitionText"], `Definition must be at least ${DEFINITION_MIN} characters.`);
+      else if (len > DEFINITION_MAX)
+        add(["definitionText"], `Definition must be at most ${DEFINITION_MAX} characters.`);
+      else if (v.definitionLanguage === "ben" && (!BENGALI_RE.test(def) || LATIN_RE.test(def)))
+        add(["definitionText"], "A Bengali definition must be written in Bengali script.");
+      else if (v.definitionLanguage === "eng" && (!LATIN_RE.test(def) || BENGALI_RE.test(def)))
+        add(["definitionText"], "An English definition must be written in English (Latin script).");
+    }
+
+    const firstSense = new Map<string, number>();
+    v.senseRelations.forEach((r, i) => {
+      if (!(SENSE_REL_TYPES as readonly string[]).includes(r.relType))
+        add(["senseRelations", i], "Choose a valid sense relation type.");
+      else if (!r.target) add(["senseRelations", i], "Search and pick a target word, or remove this row.");
+      else if (firstSense.has(r.target))
+        add(
+          ["senseRelations", i],
+          `This word sense is already used in row ${firstSense.get(r.target)! + 1}. Each target can be related only once.`
+        );
+      else firstSense.set(r.target, i);
+    });
+
+    const firstSynset = new Map<string, number>();
+    v.synsetRelations.forEach((r, i) => {
+      if (!(SYNSET_REL_TYPES as readonly string[]).includes(r.relType))
+        add(["synsetRelations", i], "Choose a valid synset relation type.");
+      else if (!r.target) add(["synsetRelations", i], "Search and pick a target concept, or remove this row.");
+      else if (v.synsetAction === "link" && r.target === v.synsetId)
+        add(
+          ["synsetRelations", i],
+          "This is the synset your word is linked to — a synset cannot relate to itself."
+        );
+      else if (firstSynset.has(r.target))
+        add(
+          ["synsetRelations", i],
+          `This concept is already used in row ${firstSynset.get(r.target)! + 1}. Each target can be related only once.`
+        );
+      else firstSynset.set(r.target, i);
+    });
+  });
+
+const FIELD_LABEL: Record<string, string> = {
+  writtenForm: "Bengali word",
+  pos: "Part of speech",
+  synsetAction: "Concept linkage",
+  synsetId: "Synset",
+  iliCode: "ILI code",
+  definitionLanguage: "Definition language",
+  definitionText: "Definition",
+  reviewerNote: "Notes",
+  senseRelations: "Sense relations",
+  synsetRelations: "Synset relations",
+  duplicate: "Duplicate",
+};
+
+function fieldLabel(key: string): string {
+  const [root, row] = key.split(".");
+  if (row !== undefined) {
+    return `${root === "senseRelations" ? "Sense relation" : "Synset relation"} row ${Number(row) + 1}`;
+  }
+  return FIELD_LABEL[root] ?? "Entry";
+}
+
+/** Keys whose "required" errors stay hidden until the user has worked on that field. */
+const TOUCH_GATED = new Set([
+  "writtenForm",
+  "synsetId",
+  "iliCode",
+  "definitionText",
+  "definitionLanguage",
+  "reviewerNote",
+]);
 
 interface RelRow {
   relType: string;
   target: string;
   label: string;
-}
-
-function relationErrors(
-  senseRels: RelRow[],
-  synsetRels: RelRow[],
-  linkedSynsetId: string | undefined
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  const seenSense = new Set<string>();
-  senseRels.forEach((r, i) => {
-    if (out.senseRelations) return;
-    if (!r.target) {
-      out.senseRelations = `Sense relation #${i + 1}: pick a target word from search, or remove the row.`;
-    } else if (seenSense.has(`${r.relType}|${r.target}`)) {
-      out.senseRelations = `Sense relation #${i + 1} is a duplicate of an earlier row.`;
-    }
-    seenSense.add(`${r.relType}|${r.target}`);
-  });
-  const seenSyn = new Set<string>();
-  synsetRels.forEach((r, i) => {
-    if (out.synsetRelations) return;
-    if (!r.target) {
-      out.synsetRelations = `Synset relation #${i + 1}: pick a target synset from search, or remove the row.`;
-    } else if (linkedSynsetId && r.target === linkedSynsetId) {
-      out.synsetRelations = `Synset relation #${i + 1} points to the same synset this word is linked to.`;
-    } else if (seenSyn.has(`${r.relType}|${r.target}`)) {
-      out.synsetRelations = `Synset relation #${i + 1} is a duplicate of an earlier row.`;
-    }
-    seenSyn.add(`${r.relType}|${r.target}`);
-  });
-  return out;
 }
 
 /** A FLAGGED / C_FLAGGED entry loaded into the form for correction and resubmission. */
@@ -249,6 +397,13 @@ export interface ResubmissionSource {
   reviewerNote: string;
   senseRelations: RelRow[];
   synsetRelations: RelRow[];
+}
+
+interface ServerCheck {
+  key: string;
+  errors: Record<string, string>;
+  nearDuplicate: string | null;
+  failed?: boolean;
 }
 
 export function QuickInputForm({
@@ -280,12 +435,13 @@ export function QuickInputForm({
   const [resubmitted, setResubmitted] = useState<{ id: string; state: EntryState } | null>(null);
   const [captcha, setCaptcha] = useState(false);
   const [honeypot, setHoneypot] = useState("");
-  const [directApprove, setDirectApprove] = useState(false);
-  const [justification, setJustification] = useState("");
-  const [confirmNearDup, setConfirmNearDup] = useState(false);
-  const [nearDupMessage, setNearDupMessage] = useState<string | null>(null);
-  /** Errors from the server (live validate / submit) and submit-time checks. */
-  const [serverErrors, setErrors] = useState<Record<string, string>>({});
+  /** The near-duplicate warning text the user confirmed; a different warning needs a new confirmation. */
+  const [confirmedNear, setConfirmedNear] = useState<string | null>(null);
+  const [touched, setTouched] = useState<Set<string>>(() => new Set());
+  const [server, setServer] = useState<ServerCheck | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
+  /** Form-level problems from the submit call (CAPTCHA, bot checks, network…). */
+  const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [pending, setPending] = useState<{
@@ -293,10 +449,22 @@ export function QuickInputForm({
     entry: Record<string, unknown>;
   } | null>(null);
 
+  /** Platform Architect and System Moderator entries are validated directly (no review queues, no CAPTCHA). */
   const isModerator =
     role === "SYSTEM_MODERATOR" || role === "PLATFORM_ARCHITECT";
+  const roleName = role === "PLATFORM_ARCHITECT" ? "Platform Architect" : "System Moderator";
   const lockedDefinition =
     synsetAction === "link" && selectedSynset?.definition ? true : false;
+  const iliNa = isIliNotAvailable(ili);
+
+  const touch = useCallback((...keys: string[]) => {
+    setTouched((prev) => {
+      if (keys.every((k) => prev.has(k))) return prev;
+      const next = new Set(prev);
+      keys.forEach((k) => next.add(k));
+      return next;
+    });
+  }, []);
 
   /** Resubmission only: whether any field differs from the loaded entry (mirrors the server's change check). */
   const hasChanges = useMemo(() => {
@@ -310,7 +478,7 @@ export function QuickInputForm({
     const definition = lockedDefinition ? "" : defText.trim();
     const initialDefinition = src.definitionText.trim();
     return (
-      word.trim() !== src.writtenForm.trim() ||
+      cleanWord(word) !== cleanWord(src.writtenForm) ||
       pos !== src.pos ||
       synsetAction !== src.synsetAction ||
       (synsetAction === "link" && (selectedSynset?.id ?? "") !== (src.synset?.id ?? "")) ||
@@ -324,250 +492,199 @@ export function QuickInputForm({
     );
   }, [src, word, pos, synsetAction, selectedSynset, ili, defText, defLang, lockedDefinition, senseRels, synsetRels, note]);
 
-  const debouncedWord = useDebounced(word.trim(), 400);
-  const debouncedIli = useDebounced(ili.trim(), 400);
-
-  /** Client-side Zod errors, derived on every render so they appear immediately. */
-  const clientErrors = useMemo(() => {
-    const local: Record<string, string> = {};
-
-    if (debouncedWord) {
-      const wordOnly = z
-        .object({ writtenForm: quickInputClientSchema.shape.writtenForm })
-        .safeParse({ writtenForm: debouncedWord });
-      if (!wordOnly.success) {
-        local.writtenForm = wordOnly.error.issues[0]?.message ?? "Invalid word.";
-      }
-    }
-
-    const extras = z
-      .object({
-        definitionText: quickInputClientSchema.shape.definitionText,
-        reviewerNote: quickInputClientSchema.shape.reviewerNote,
-      })
-      .safeParse({
-        definitionText: defText.trim() || undefined,
-        reviewerNote: note.trim() || undefined,
-      });
-    if (!extras.success) {
-      for (const issue of extras.error.issues) {
-        const key = String(issue.path[0] ?? "form");
-        if (!local[key]) local[key] = issue.message;
-      }
-    }
-
-    if (synsetAction === "link" && selectedSynset && selectedSynset.pos !== pos) {
-      local.synsetId = `POS mismatch: selected synset is "${selectedSynset.pos}" but the lemma is "${pos}".`;
-    }
-    if (synsetAction === "create" && debouncedIli && !isIliNotAvailable(debouncedIli)) {
-      if (!ILI_RE.test(debouncedIli)) {
-        local.iliCode =
-          "ILI code must follow the format {8-digit-offset}-{n|v|a|r}, e.g. 04192858-n — or select N/A.";
-      } else if (!debouncedIli.endsWith(pos)) {
-        local.iliCode = "ILI code POS suffix must match the selected part of speech.";
-      }
-    }
-    if (defLang === "ben" && defText.trim() && !BENGALI_RE.test(defText)) {
-      local.definitionText =
-        "Bengali definitions must contain Bengali script characters.";
-    }
-
-    // Relation rows are only checked once a target is picked, so a fresh empty row isn't red.
-    Object.assign(
-      local,
-      relationErrors(
-        senseRels.filter((r) => r.target),
-        synsetRels.filter((r) => r.target),
-        synsetAction === "link" ? selectedSynset?.id : undefined
-      )
-    );
-    return local;
-  }, [
-    debouncedWord,
-    debouncedIli,
-    pos,
-    synsetAction,
-    selectedSynset,
-    defText,
-    defLang,
-    note,
-    senseRels,
-    synsetRels,
-  ]);
-
-  const errors = useMemo(
-    () => ({ ...serverErrors, ...clientErrors }),
-    [serverErrors, clientErrors]
-  );
-
-  /** Server-side duplicate / linkage / ILI validation against the full lexicon. */
-  useEffect(() => {
-    if (!debouncedWord || clientErrors.writtenForm) return;
-    const readyForServer =
-      (synsetAction === "link" && !!selectedSynset) ||
-      (synsetAction === "create" && !!debouncedIli);
-    if (!readyForServer) return;
-
-    let cancelled = false;
-    fetch("/api/lookup/validate", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        writtenForm: debouncedWord,
-        pos,
-        synsetAction,
-        synsetId: synsetAction === "link" ? selectedSynset?.id : undefined,
-        iliCode:
-          synsetAction === "create"
-            ? isIliNotAvailable(debouncedIli)
-              ? ILI_NOT_AVAILABLE
-              : debouncedIli
-            : undefined,
-        confirmNearDuplicate: confirmNearDup,
-        excludeSubmissionId: src?.id,
-      }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (cancelled) return;
-        setErrors((prev) => {
-          const n = { ...prev };
-          delete n.duplicate;
-          delete n.synsetId;
-          delete n.iliCode;
-          delete n.writtenForm;
-          return data.errors && typeof data.errors === "object"
-            ? { ...n, ...data.errors }
-            : n;
-        });
-        if (data.nearDuplicate) {
-          setNearDupMessage(data.nearDuplicate);
-        } else if (!data.errors?.duplicate) {
-          setNearDupMessage(null);
-        }
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    debouncedWord,
-    debouncedIli,
-    pos,
-    synsetAction,
-    selectedSynset,
-    confirmNearDup,
-    clientErrors.writtenForm,
-    src?.id,
-  ]);
-
-  /** Validates the form; returns the payload, or null after showing the errors. */
-  function prepare(saveAsDraft: boolean): Record<string, unknown> | null {
-    setSuccess(null);
-
-    const client = quickInputClientSchema.safeParse({
-      writtenForm: word.trim(),
-      pos,
-      synsetAction,
-      definitionText: lockedDefinition ? undefined : defText.trim() || undefined,
-      reviewerNote: note.trim() || undefined,
-    });
-    const preErrors: Record<string, string> = {};
-    if (!client.success) {
-      for (const issue of client.error.issues) {
-        const key = String(issue.path[0] ?? "form");
-        if (!preErrors[key]) preErrors[key] = issue.message;
-      }
-    }
-    if (synsetAction === "link" && !selectedSynset) {
-      preErrors.synsetId = "Select an existing synset from search.";
-    }
-    if (synsetAction === "link" && selectedSynset && selectedSynset.pos !== pos) {
-      preErrors.synsetId = `POS mismatch: selected synset is "${selectedSynset.pos}" but the lemma is "${pos}".`;
-    }
-    if (synsetAction === "create") {
-      if (!ili.trim()) {
-        preErrors.iliCode = "Enter an ILI code or select N/A.";
-      } else if (!isIliNotAvailable(ili) && !ILI_RE.test(ili.trim())) {
-        preErrors.iliCode =
-          "ILI code must follow the format {8-digit-offset}-{n|v|a|r}, e.g. 04192858-n — or select N/A.";
-      } else if (!isIliNotAvailable(ili) && !ili.trim().endsWith(pos)) {
-        preErrors.iliCode = "ILI code POS suffix must match the selected part of speech.";
-      }
-    }
-    if (defLang === "ben" && defText.trim() && !BENGALI_RE.test(defText) && !lockedDefinition) {
-      preErrors.definitionText =
-        "Bengali definitions must contain Bengali script characters.";
-    }
-    Object.assign(
-      preErrors,
-      relationErrors(
-        senseRels,
-        synsetRels,
-        synsetAction === "link" ? selectedSynset?.id : undefined
-      )
-    );
-    if (isModerator && directApprove && justification.trim().length < 20) {
-      preErrors.directApproveJustification =
-        "Direct approval requires a written justification of at least 20 characters.";
-    }
-    if (!isModerator && !saveAsDraft && !captcha) {
-      preErrors.captcha = "Please complete the CAPTCHA verification.";
-    }
-    if (Object.keys(preErrors).length > 0) {
-      setErrors(preErrors);
-      return null;
-    }
-
-    return {
-      writtenForm: word.trim(),
+  /** Exactly what is sent to the server — every relation row included, so row errors line up by index. */
+  const entry = useMemo(
+    () => ({
+      writtenForm: cleanWord(word),
       pos,
       synsetAction,
       synsetId: synsetAction === "link" ? selectedSynset?.id : undefined,
       iliCode:
         synsetAction === "create"
-          ? isIliNotAvailable(ili)
+          ? iliNa
             ? ILI_NOT_AVAILABLE
-            : ili.trim()
+            : ili.trim().toLowerCase()
           : undefined,
       definitionLanguage: defLang,
       definitionText: lockedDefinition ? undefined : defText.trim() || undefined,
-      senseRelations: senseRels
-        .filter((r) => r.target)
-        .map((r) => ({ relType: r.relType, target: r.target })),
-      synsetRelations: synsetRels
-        .filter((r) => r.target)
-        .map((r) => ({ relType: r.relType, target: r.target })),
-      reviewerNote: note.trim() || undefined,
-    };
-  }
+      senseRelations: senseRels.map((r) => ({ relType: r.relType, target: r.target })),
+      synsetRelations: synsetRels.map((r) => ({ relType: r.relType, target: r.target })),
+      reviewerNote: isModerator ? undefined : note.trim() || undefined,
+    }),
+    [word, pos, synsetAction, selectedSynset, ili, iliNa, defLang, defText, lockedDefinition, senseRels, synsetRels, note, isModerator]
+  );
+  const entryKey = useMemo(() => JSON.stringify(entry), [entry]);
 
-  /** Validates, then asks for confirmation before anything is sent. */
+  /** Client-side Zod errors, keyed like the server's ("senseRelations.0", …). */
+  const clientErrors = useMemo(() => {
+    const parsed = quickInputSchema.safeParse({
+      writtenForm: word,
+      pos,
+      synsetAction,
+      synsetId: selectedSynset?.id,
+      synsetPos: selectedSynset?.pos,
+      iliCode: ili,
+      definitionLocked: lockedDefinition,
+      definitionLanguage: defLang,
+      definitionText: defText,
+      reviewerNote: note,
+      senseRelations: senseRels,
+      synsetRelations: synsetRels,
+    });
+    const out: Record<string, string> = {};
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        const key = issue.path.map(String).join(".") || "form";
+        if (!out[key]) out[key] = issue.message;
+      }
+    }
+    return out;
+  }, [word, pos, synsetAction, selectedSynset, ili, lockedDefinition, defLang, defText, note, senseRels, synsetRels]);
+
+  const wordReady = !clientErrors.writtenForm;
+  const debouncedKey = useDebounced(entryKey, 400);
+
+  /** Live server check: duplicates across the whole database, ILI registry, lexicon targets. */
+  useEffect(() => {
+    if (!wordReady || debouncedKey !== entryKey) return;
+    let cancelled = false;
+    const key = debouncedKey;
+    fetch("/api/lookup/validate", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...JSON.parse(key), excludeSubmissionId: src?.id }),
+    })
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error ?? "unavailable");
+        return data;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setServer({
+          key,
+          errors: data.errors && typeof data.errors === "object" ? data.errors : {},
+          nearDuplicate: data.nearDuplicate ?? null,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setServer({ key, errors: {}, nearDuplicate: null, failed: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedKey, entryKey, wordReady, src?.id, retryTick]);
+
+  const serverFresh = server !== null && server.key === entryKey;
+  const validating = wordReady && !serverFresh;
+  const serverFailed = serverFresh && server.failed === true;
+  /** Last server answer stays visible while a newer check runs, so messages don't flicker. */
+  const serverErrors = useMemo(
+    () => (wordReady && server && !server.failed ? server.errors : {}),
+    [wordReady, server]
+  );
+  const nearDuplicate =
+    wordReady && server && !server.failed && !server.errors.duplicate ? server.nearDuplicate : null;
+  const nearConfirmed = nearDuplicate !== null && confirmedNear === nearDuplicate;
+
+  const allErrors = useMemo(
+    () => ({ ...serverErrors, ...clientErrors }),
+    [serverErrors, clientErrors]
+  );
+
+  const isVisible = useCallback(
+    (key: string) => {
+      const root = key.split(".")[0];
+      return Boolean(src) || !TOUCH_GATED.has(root) || touched.has(root);
+    },
+    [src, touched]
+  );
+
+  /** Everything that still keeps Submit / Save as Draft / Resubmit disabled. */
+  const blockers = useMemo(() => {
+    const list: { key: string; text: string }[] = [];
+    for (const [key, message] of Object.entries(allErrors)) {
+      list.push({ key, text: `${fieldLabel(key)}: ${message}` });
+    }
+    if (serverFresh && !serverFailed && nearDuplicate && !nearConfirmed) {
+      list.push({
+        key: "near",
+        text: "Possible duplicate: confirm it is a different meaning (polysemy), or change the entry.",
+      });
+    }
+    if (serverFailed) {
+      list.push({ key: "server", text: "Database check unavailable — retry in a moment." });
+    }
+    if (!isModerator && !captcha) {
+      list.push({ key: "captcha", text: "Verification: tick “I'm not a robot”." });
+    }
+    if (src && !hasChanges) {
+      list.push({ key: "changes", text: "Edit at least one field to resubmit." });
+    }
+    return list;
+  }, [allErrors, serverFresh, serverFailed, nearDuplicate, nearConfirmed, isModerator, captcha, src, hasChanges]);
+
+  const canSubmit = !busy && !validating && blockers.length === 0;
+
+  /** Opens the confirmation popup; nothing is sent until the user confirms. */
   function requestSubmit(saveAsDraft: boolean) {
-    const entry = prepare(saveAsDraft);
-    if (!entry) return;
+    setSuccess(null);
+    setFormError(null);
+    if (!canSubmit) {
+      touch(...TOUCH_GATED);
+      return;
+    }
     setPending({ kind: src ? "resubmit" : saveAsDraft ? "draft" : "submit", entry });
   }
 
   async function confirmPending() {
     if (!pending) return;
-    const { kind, entry } = pending;
+    const { kind, entry: payload } = pending;
     setBusy(true);
     try {
       if (kind === "resubmit") {
-        await resubmit(entry);
+        await resubmit(payload);
       } else {
-        await submit(entry, kind === "draft");
+        await submit(payload, kind === "draft");
       }
     } finally {
       setPending(null);
     }
   }
 
-  async function submit(entry: Record<string, unknown>, saveAsDraft: boolean) {
+  /** Shows a rejected submit response on the form: field errors inline, the rest in the banner. */
+  function applyFailure(status: number, data: Record<string, unknown>, fallback: string, sentKey: string) {
+    touch(...TOUCH_GATED);
+    if (status === 409 && typeof data.nearDuplicate === "string") {
+      setServer({ key: sentKey, errors: {}, nearDuplicate: data.nearDuplicate });
+      setConfirmedNear(null);
+      return;
+    }
+    const errs = (data.errors && typeof data.errors === "object" ? data.errors : {}) as Record<string, string>;
+    const { form, captcha: captchaError, ...fieldErrors } = errs;
+    if (Object.keys(fieldErrors).length > 0) {
+      setServer((prev) => ({
+        key: sentKey,
+        errors: fieldErrors,
+        nearDuplicate: prev?.key === sentKey ? prev.nearDuplicate : null,
+      }));
+    }
+    if (captchaError) setCaptcha(false);
+    setFormError(
+      form ??
+        captchaError ??
+        (Object.keys(fieldErrors).length > 0
+          ? "The entry was not saved. Fix the fields marked in red."
+          : typeof data.error === "string"
+            ? data.error
+            : fallback)
+    );
+  }
+
+  async function submit(payload: Record<string, unknown>, saveAsDraft: boolean) {
     idempotencyKeyRef.current ??= newIdempotencyKey();
+    const sentKey = JSON.stringify(payload);
     try {
       const res = await fetch("/api/submissions", {
         method: "POST",
@@ -577,35 +694,29 @@ export function QuickInputForm({
           "Idempotency-Key": idempotencyKeyRef.current,
         },
         body: JSON.stringify({
-          ...entry,
+          ...payload,
           honeypot,
           elapsedSeconds: (Date.now() - mountedAtRef.current) / 1000,
           captchaPassed: captcha,
-          confirmNearDuplicate: confirmNearDup,
-          directApprove: isModerator ? directApprove : undefined,
-          directApproveJustification: isModerator ? justification : undefined,
+          confirmNearDuplicate: nearConfirmed,
           saveAsDraft,
         }),
       });
-      const data = await res.json();
-      if (res.status === 409 && data.nearDuplicate) {
-        setNearDupMessage(data.nearDuplicate);
-        return;
-      }
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setErrors(data.errors ?? { form: data.error ?? "Submission failed." });
+        applyFailure(res.status, data, "The entry could not be saved. Please try again.", sentKey);
         return;
       }
       idempotencyKeyRef.current = null;
-      setErrors({});
-      setNearDupMessage(null);
       setSuccess(
         !data.id
           ? "Submission received."
           : saveAsDraft
-          ? `Saved as draft (${data.id}). You can edit it from My Submissions.`
+          ? isModerator
+            ? `Saved as draft (${data.id}). It will be validated directly when you submit it from My Submissions.`
+            : `Saved as draft (${data.id}). You can edit it from My Submissions.`
           : data.state === "VALIDATED"
-            ? `Entry ${data.id} submitted and marked Validated.`
+            ? `Entry ${data.id} validated directly — it is now part of the lexicon. Validation is final; its status cannot be changed.`
             : data.state === "UNDER_REVIEW"
               ? `Entry ${data.id} is held Under Review for a security check. A System Moderator will clear it shortly.`
               : `Entry ${data.id} submitted — it is now Pending Review in the Lexical Editor's queue.`
@@ -619,46 +730,41 @@ export function QuickInputForm({
       setSynsetRels([]);
       setNote("");
       setCaptcha(false);
-      setConfirmNearDup(false);
-      setDirectApprove(false);
-      setJustification("");
+      setConfirmedNear(null);
+      setTouched(new Set());
+      setServer(null);
       mountedAtRef.current = Date.now();
       router.refresh();
     } catch {
-      setErrors({ form: "Network error — the entry was not submitted. Please try again." });
+      setFormError("Network error — the entry was not submitted. Please try again.");
     } finally {
       setBusy(false);
     }
   }
 
-  async function resubmit(entry: Record<string, unknown>) {
+  async function resubmit(payload: Record<string, unknown>) {
     if (!src) return;
+    const sentKey = JSON.stringify(payload);
     try {
       const res = await fetch(`/api/submissions/${encodeURIComponent(src.id)}/resubmit`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...entry,
+          ...payload,
           captchaPassed: captcha,
-          confirmNearDuplicate: confirmNearDup,
+          confirmNearDuplicate: nearConfirmed,
           expectedVersion: src.version ?? undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.status === 409 && data.nearDuplicate) {
-        setNearDupMessage(data.nearDuplicate);
-        return;
-      }
       if (!res.ok) {
-        setErrors(data.errors ?? { form: data.error ?? "Resubmission failed. Please try again." });
+        applyFailure(res.status, data, "Resubmission failed. Please try again.", sentKey);
         return;
       }
-      setErrors({});
-      setNearDupMessage(null);
       setResubmitted({ id: data.id ?? src.id, state: data.state ?? src.targetState });
     } catch {
-      setErrors({ form: "Network error — the entry was not resubmitted. Please try again." });
+      setFormError("Network error — the entry was not resubmitted. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -672,7 +778,15 @@ export function QuickInputForm({
     confirmLabel: string;
     toState: EntryState;
   } => {
-    const who = word.trim() ? `“${word.trim()}”` : "This entry";
+    const who = word.trim() ? `“${cleanWord(word)}”` : "This entry";
+    if (isModerator && pending?.kind !== "draft") {
+      return {
+        title: src ? "Resubmit and validate directly?" : "Submit and validate directly?",
+        description: `As ${roleName}, your entry is not reviewed by a Lexical Editor or Chief Lexical Editor. ${who} will be marked Validated immediately and added to the lexicon with permanent IDs — it appears in search, can be linked and related, and is included in the XML export.`,
+        confirmLabel: "Yes, validate now",
+        toState: "VALIDATED",
+      };
+    }
     if (pending?.kind === "resubmit" && src) {
       const toChief = src.targetState === "EDITOR_APPROVED";
       return {
@@ -687,17 +801,11 @@ export function QuickInputForm({
     if (pending?.kind === "draft") {
       return {
         title: "Save as draft?",
-        description: `${who} will be saved as a Draft. It is not sent for review until you submit it from My Submissions.`,
+        description: isModerator
+          ? `${who} will be saved as a Draft. Nothing is validated yet — when you submit it from My Submissions, it is marked Validated immediately and added to the lexicon, and from then on its status is final.`
+          : `${who} will be saved as a Draft. It is not sent for review until you submit it from My Submissions.`,
         confirmLabel: "Save draft",
         toState: "DRAFT",
-      };
-    }
-    if (isModerator && directApprove) {
-      return {
-        title: "Submit and validate directly?",
-        description: `${who} will be added and marked Validated immediately, skipping the review queues. Your justification is recorded in the audit trail.`,
-        confirmLabel: "Submit & validate",
-        toState: "VALIDATED",
       };
     }
     return {
@@ -708,15 +816,28 @@ export function QuickInputForm({
     };
   })();
 
-  const fieldError = (key: string) =>
-    errors[key] ? (
-      <p className="mt-1 text-xs font-medium text-rose-600">{errors[key]}</p>
+  const shownError = (key: string): string | null =>
+    allErrors[key] && isVisible(key) ? allErrors[key] : null;
+
+  const fieldError = (key: string) => {
+    const message = shownError(key);
+    return message ? (
+      <p role="alert" className="mt-1 flex items-start gap-1 text-xs font-medium text-red-600">
+        <span aria-hidden="true">⚠</span>
+        <span>{message}</span>
+      </p>
     ) : null;
+  };
 
   const inputBorder = (key: string) =>
-    errors[key]
-      ? "border-rose-400 focus:border-rose-500 focus:ring-rose-200"
+    shownError(key)
+      ? "border-red-400 bg-red-50/40 focus:border-red-500 focus:ring-red-200"
       : "border-slate-300 focus:border-emerald-500 focus:ring-emerald-200";
+
+  const usedSenseTargets = (exceptRow: number) =>
+    new Map(senseRels.flatMap((r, j) => (r.target && j !== exceptRow ? [[r.target, j] as const] : [])));
+  const usedSynsetTargets = (exceptRow: number) =>
+    new Map(synsetRels.flatMap((r, j) => (r.target && j !== exceptRow ? [[r.target, j] as const] : [])));
 
   if (resubmitted) {
     return (
@@ -725,9 +846,11 @@ export function QuickInputForm({
           <p className="font-bold">✓ Entry {resubmitted.id} resubmitted.</p>
           <p className="mt-1">
             Status changed to {STATE_LABEL[resubmitted.state] ?? resubmitted.state}
-            {resubmitted.state === "EDITOR_APPROVED"
-              ? " — it is back with the Chief Lexical Editor for final review."
-              : " — it is back in the Lexical Editor review queue."}
+            {resubmitted.state === "VALIDATED"
+              ? " — it is now part of the lexicon and its status is final."
+              : resubmitted.state === "EDITOR_APPROVED"
+                ? " — it is back with the Chief Lexical Editor for final review."
+                : " — it is back in the Lexical Editor review queue."}
           </p>
         </div>
         <div className="flex flex-wrap gap-3 text-sm font-semibold">
@@ -753,9 +876,10 @@ export function QuickInputForm({
       className="space-y-6"
       onSubmit={(e) => {
         e.preventDefault();
-        if (busy || (src && !hasChanges)) return;
+        if (!canSubmit) return;
         requestSubmit(false);
       }}
+      noValidate
     >
       <ConfirmModal
         open={pending !== null}
@@ -767,11 +891,36 @@ export function QuickInputForm({
         onConfirm={confirmPending}
         onCancel={cancelPending}
       >
+        {confirmCopy.toState === "VALIDATED" ? (
+          <div className="mb-3 space-y-2">
+            <p className="rounded-xl border border-purple-200 bg-purple-50 px-3 py-2 text-xs font-semibold text-purple-900">
+              ⚡ Direct validation — no review step follows this confirmation.
+            </p>
+            <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">
+              🔒 Validation is final. Once validated, the status cannot be changed or overridden, and the
+              entry cannot be edited or withdrawn. Check every field before you confirm.
+            </p>
+          </div>
+        ) : null}
         <dl className="grid grid-cols-3 gap-x-3 gap-y-1.5 rounded-xl bg-slate-50 px-4 py-3 text-sm ring-1 ring-inset ring-slate-200">
           <dt className="text-slate-400">Word</dt>
-          <dd className="font-bengali col-span-2 font-bold text-slate-900">{word.trim()}</dd>
+          <dd className="font-bengali col-span-2 font-bold text-slate-900">{cleanWord(word)}</dd>
           <dt className="text-slate-400">Part of speech</dt>
           <dd className="col-span-2 text-slate-700">{POS_LABEL[pos as POS] ?? pos}</dd>
+          <dt className="text-slate-400">Concept</dt>
+          <dd className="col-span-2 font-mono text-xs text-slate-700">
+            {synsetAction === "link"
+              ? `Link to ${selectedSynset?.id ?? "—"}`
+              : iliNa
+                ? "New synset · ILI N/A"
+                : `New synset · ILI ${ili.trim().toLowerCase()}`}
+          </dd>
+          {nearConfirmed ? (
+            <>
+              <dt className="text-slate-400">Polysemy</dt>
+              <dd className="col-span-2 text-amber-700">Confirmed as a different meaning</dd>
+            </>
+          ) : null}
           <dt className="text-slate-400">New status</dt>
           <dd className="col-span-2">
             <StateBadge state={confirmCopy.toState} />
@@ -793,10 +942,31 @@ export function QuickInputForm({
             </p>
           ) : null}
           <p className="mt-1.5 text-xs text-sky-800">
-            After resubmission the entry returns to{" "}
+            After resubmission the entry {src.targetState === "VALIDATED" ? "becomes" : "returns to"}{" "}
             <strong>{STATE_LABEL[src.targetState] ?? src.targetState}</strong>. Resubmit becomes
             available once you edit the entry.
           </p>
+        </div>
+      ) : null}
+      {isModerator ? (
+        <div className="rounded-xl border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-900">
+          <p className="font-bold">⚡ Your entries are validated directly</p>
+          <p className="mt-1 leading-relaxed">
+            As {roleName}, anything you {src ? "resubmit" : "submit"} here skips the Lexical Editor and
+            Chief Lexical Editor review. Its status becomes <strong>Validated</strong> immediately and it is
+            added to the lexicon (search, linking, relations and XML export). All validation and duplicate
+            checks still apply.
+          </p>
+          <p className="mt-2 rounded-lg border border-red-200 bg-white/70 px-3 py-2 text-xs font-semibold text-red-800">
+            {`🔒 Validation is final — once an entry is Validated, its status cannot be changed or overridden, and it cannot be edited or withdrawn. Review every field carefully before you ${
+              src ? "resubmit" : "submit"
+            }.`}
+          </p>
+          {!src ? (
+            <p className="mt-1 text-xs text-purple-800">
+              Save as Draft keeps the entry private; it is validated when you submit the draft from My Submissions.
+            </p>
+          ) : null}
         </div>
       ) : null}
       {success ? (
@@ -804,20 +974,26 @@ export function QuickInputForm({
           ✓ {success}
         </div>
       ) : null}
-      {errors.form || errors.captcha || errors.duplicate ? (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
-          {errors.form ?? errors.captcha ?? errors.duplicate}
+      {formError ? (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+          {formError}
         </div>
       ) : null}
-      {nearDupMessage ? (
+      {allErrors.duplicate ? (
+        <div role="alert" className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <p className="font-bold">✕ Duplicate entry — cannot be saved</p>
+          <p className="font-bengali mt-1">{allErrors.duplicate}</p>
+        </div>
+      ) : null}
+      {nearDuplicate ? (
         <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <p className="font-semibold">⚠ Possible duplicate</p>
-          <p className="mt-1">{nearDupMessage}</p>
+          <p className="font-bengali mt-1">{nearDuplicate}</p>
           <label className="mt-2 flex items-center gap-2 text-sm font-semibold">
             <input
               type="checkbox"
-              checked={confirmNearDup}
-              onChange={(e) => setConfirmNearDup(e.target.checked)}
+              checked={nearConfirmed}
+              onChange={(e) => setConfirmedNear(e.target.checked ? nearDuplicate : null)}
               className="h-4 w-4 accent-amber-600"
             />
             I confirm this is a distinct meaning (legitimate polysemy)
@@ -841,52 +1017,56 @@ export function QuickInputForm({
         {/* Bengali word */}
         <div>
           <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-            Bengali word (writtenForm) <span className="text-rose-500">*</span>
+            Bengali word (writtenForm) <span className="text-red-500">*</span>
           </label>
           <input
             value={word}
             onChange={(e) => {
               setWord(e.target.value);
-              setErrors((prev) => {
-                const n = { ...prev };
-                delete n.writtenForm;
-                delete n.duplicate;
-                return n;
-              });
+              touch("writtenForm");
             }}
-            onBlur={() => setWord((w) => w.trim())}
+            onBlur={() => {
+              setWord((w) => cleanWord(w));
+              touch("writtenForm");
+            }}
             placeholder="যেমন: মুঠোফোন"
             lang="bn"
-            maxLength={25}
+            maxLength={WORD_MAX + 10}
+            aria-invalid={Boolean(shownError("writtenForm")) || undefined}
             className={`font-bengali w-full rounded-xl border px-3 py-2.5 text-lg outline-none transition focus:ring-2 ${inputBorder("writtenForm")}`}
           />
-          <p className="mt-1 text-[11px] text-slate-400">
-            Bengali Unicode (U+0980–U+09FF) · max 25 characters ·{" "}
-            {25 - word.length} left
+          <p
+            className={`mt-1 text-[11px] ${
+              codePoints(cleanWord(word)) > WORD_MAX ? "font-semibold text-red-600" : "text-slate-400"
+            }`}
+          >
+            Bengali letters only · no digits or symbols · max {WORD_MAX} characters ·{" "}
+            {WORD_MAX - codePoints(cleanWord(word))} left
           </p>
           {fieldError("writtenForm")}
+          {wordReady && validating && !serverFailed ? (
+            <p className="mt-1 text-[11px] font-medium text-slate-400">Checking the database…</p>
+          ) : null}
+          {wordReady && serverFresh && !serverFailed && !allErrors.duplicate && !allErrors.writtenForm ? (
+            <p className="mt-1 text-[11px] font-medium text-emerald-700">
+              ✓ Checked against the lexicon and all submissions
+            </p>
+          ) : null}
         </div>
 
         {/* POS */}
         <div>
           <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-            Part of speech <span className="text-rose-500">*</span>
+            Part of speech <span className="text-red-500">*</span>
           </label>
           <select
             value={pos}
             onChange={(e) => {
               setPos(e.target.value);
               setSelectedSynset(null);
-              setErrors((prev) => {
-                const n = { ...prev };
-                delete n.pos;
-                delete n.synsetId;
-                delete n.iliCode;
-                delete n.duplicate;
-                return n;
-              });
+              touch("pos");
             }}
-            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+            className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none transition focus:ring-2 ${inputBorder("pos")}`}
           >
             <option value="n">Noun (n) — বিশেষ্য</option>
             <option value="v">Verb (v) — ক্রিয়া</option>
@@ -900,7 +1080,7 @@ export function QuickInputForm({
       {/* Synset action */}
       <fieldset className="rounded-2xl border border-slate-200 bg-slate-50/50 p-5">
         <legend className="px-2 text-sm font-bold text-slate-700">
-          Concept (Synset) linkage <span className="text-rose-500">*</span>
+          Concept (Synset) linkage <span className="text-red-500">*</span>
         </legend>
         <div className="flex flex-wrap gap-5">
           {(
@@ -935,21 +1115,20 @@ export function QuickInputForm({
               endpoint="/api/lookup/synsets"
               posFilter={pos}
               keyOf={(h) => h.id}
+              invalid={Boolean(shownError("synsetId"))}
               onSelect={(h) => {
                 setSelectedSynset(h);
-                setErrors((prev) => {
-                  const n = { ...prev };
-                  delete n.synsetId;
-                  delete n.duplicate;
-                  return n;
-                });
+                touch("synsetId");
               }}
               selectedLabel={
                 selectedSynset
                   ? `${selectedSynset.id} (${selectedSynset.pos}) — ${selectedSynset.words.join(", ") || "no words"} ${selectedSynset.definition ? `· ${selectedSynset.definition}` : ""}`
                   : undefined
               }
-              onClear={() => setSelectedSynset(null)}
+              onClear={() => {
+                setSelectedSynset(null);
+                touch("synsetId");
+              }}
               render={(h) => (
                 <span>
                   <span className="font-mono text-xs font-bold text-emerald-700">
@@ -958,6 +1137,7 @@ export function QuickInputForm({
                   <span className="rounded bg-slate-100 px-1 text-[10px] font-bold uppercase">
                     {h.pos}
                   </span>{" "}
+                  <NewBadge origin={h.origin} />{" "}
                   <span className="font-bengali">{h.words.join(", ")}</span>
                   {h.definition ? (
                     <span className="font-bengali block text-xs text-slate-400">
@@ -967,19 +1147,16 @@ export function QuickInputForm({
                 </span>
               )}
             />
-            {selectedSynset && selectedSynset.pos !== pos ? (
-              <p className="mt-1 text-xs font-medium text-rose-600">
-                POS mismatch: this synset is “{selectedSynset.pos}” but your
-                lemma is “{pos}”.
-              </p>
-            ) : null}
+            <p className="mt-1 text-[11px] text-slate-400">
+              Only concepts already in the lexicon (imported or validated) can be linked.
+            </p>
             {fieldError("synsetId")}
           </div>
         ) : (
           <div className="mt-4 space-y-4">
             <div>
               <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-                ILI code <span className="text-rose-500">*</span>
+                ILI code <span className="text-red-500">*</span>
               </label>
 
               <label className="mb-3 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 transition hover:border-emerald-300">
@@ -994,6 +1171,7 @@ export function QuickInputForm({
                       setIli("");
                       setIliPicked(false);
                     }
+                    touch("iliCode");
                   }}
                   className="mt-0.5 h-4 w-4 accent-emerald-700"
                 />
@@ -1018,15 +1196,24 @@ export function QuickInputForm({
                     onClick={() => {
                       setIli("");
                       setIliPicked(false);
+                      touch("iliCode");
                     }}
-                    className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-rose-700 ring-1 ring-inset ring-rose-200 transition hover:bg-rose-50"
+                    className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-red-700 ring-1 ring-inset ring-red-200 transition hover:bg-red-50"
                   >
                     Clear N/A
                   </button>
                 </div>
               ) : iliPicked && ili ? (
-                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2.5">
-                  <code className="min-w-0 flex-1 font-mono text-sm font-bold text-emerald-900">
+                <div
+                  className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2.5 ${
+                    shownError("iliCode") ? "border-red-300 bg-red-50" : "border-emerald-300 bg-emerald-50"
+                  }`}
+                >
+                  <code
+                    className={`min-w-0 flex-1 font-mono text-sm font-bold ${
+                      shownError("iliCode") ? "text-red-900" : "text-emerald-900"
+                    }`}
+                  >
                     {ili}
                   </code>
                   <button
@@ -1034,8 +1221,9 @@ export function QuickInputForm({
                     onClick={() => {
                       setIli("");
                       setIliPicked(false);
+                      touch("iliCode");
                     }}
-                    className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-rose-700 ring-1 ring-inset ring-rose-200 transition hover:bg-rose-50"
+                    className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-red-700 ring-1 ring-inset ring-red-200 transition hover:bg-red-50"
                   >
                     Discard
                   </button>
@@ -1046,21 +1234,17 @@ export function QuickInputForm({
                   onChange={(e) => {
                     setIli(e.target.value);
                     setIliPicked(false);
-                    setErrors((prev) => {
-                      const n = { ...prev };
-                      delete n.iliCode;
-                      delete n.duplicate;
-                      return n;
-                    });
+                    touch("iliCode");
                   }}
                   placeholder="ILI code, e.g. 04192858-n — or pick one below / select N/A"
+                  aria-invalid={Boolean(shownError("iliCode")) || undefined}
                   className={`w-full rounded-xl border px-3 py-2.5 font-mono text-sm outline-none transition focus:ring-2 ${inputBorder("iliCode")}`}
                 />
               )}
               <p className="mt-1 text-[11px] text-slate-400">
                 {isIliNotAvailable(ili)
                   ? "This entry will be created without a WordNet ILI link."
-                  : `Format: {8-digit-zero-padded-offset}-{n|v|a|r} — must exist in the Princeton WordNet 2.1 registry${
+                  : `Format: {8-digit-zero-padded-offset}-{n|v|a|r}. An ILI already in the lexicon or proposed by another entry cannot be created again — link to its synset instead${
                       iliPicked
                         ? ". Discard to choose a different code."
                         : ". Use the finder below if you do not know the code, or select N/A above."
@@ -1075,6 +1259,7 @@ export function QuickInputForm({
                 onSelect={(hit) => {
                   setIli(hit.ili);
                   setIliPicked(true);
+                  touch("iliCode");
                 }}
               />
             ) : null}
@@ -1091,18 +1276,24 @@ export function QuickInputForm({
           </label>
           <select
             value={defLang}
-            onChange={(e) => setDefLang(e.target.value as "ben" | "eng")}
+            onChange={(e) => {
+              setDefLang(e.target.value as "ben" | "eng");
+              touch("definitionLanguage");
+            }}
             disabled={lockedDefinition}
-            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 disabled:bg-slate-100"
+            className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none transition focus:ring-2 disabled:bg-slate-100 ${inputBorder("definitionLanguage")}`}
           >
             <option value="ben">Bengali (ben)</option>
             <option value="eng">English (eng)</option>
           </select>
+          {fieldError("definitionLanguage")}
         </div>
         <div>
           <label className="mb-1.5 block text-sm font-semibold text-slate-700">
             Definition text{" "}
-            <span className="font-normal text-slate-400">(optional, max 500)</span>
+            <span className="font-normal text-slate-400">
+              (optional · {DEFINITION_MIN}–{DEFINITION_MAX} characters · in the selected language)
+            </span>
           </label>
           {lockedDefinition ? (
             <div className="font-bengali rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm text-slate-600">
@@ -1116,19 +1307,21 @@ export function QuickInputForm({
               value={defText}
               onChange={(e) => {
                 setDefText(e.target.value);
-                setErrors((prev) => {
-                  const n = { ...prev };
-                  delete n.definitionText;
-                  return n;
-                });
+                touch("definitionText");
               }}
-              maxLength={500}
+              maxLength={DEFINITION_MAX + 50}
               rows={3}
-              lang="bn"
-              placeholder="ধারণাটির সংজ্ঞা লিখুন…"
+              lang={defLang === "eng" ? "en" : "bn"}
+              placeholder={defLang === "eng" ? "Write the definition in English…" : "ধারণাটির সংজ্ঞা লিখুন…"}
+              aria-invalid={Boolean(shownError("definitionText")) || undefined}
               className={`font-bengali w-full rounded-xl border px-3 py-2.5 text-sm outline-none transition focus:ring-2 ${inputBorder("definitionText")}`}
             />
           )}
+          {!lockedDefinition && defText.trim() ? (
+            <p className="mt-1 text-right text-[11px] text-slate-400">
+              {codePoints(defText.trim())}/{DEFINITION_MAX}
+            </p>
+          ) : null}
           {fieldError("definitionText")}
         </div>
       </div>
@@ -1136,91 +1329,120 @@ export function QuickInputForm({
       {/* Relations */}
       <div className="grid gap-5 lg:grid-cols-2">
         {/* Sense relations */}
-        <fieldset className="rounded-2xl border border-slate-200 p-5">
+        <fieldset
+          className={`rounded-2xl border p-5 ${
+            Object.keys(allErrors).some((k) => k.startsWith("senseRelations"))
+              ? "border-red-200"
+              : "border-slate-200"
+          }`}
+        >
           <legend className="px-2 text-sm font-bold text-slate-700">
-            Sense relations <span className="font-normal text-slate-400">(optional)</span>
+            Sense relations{" "}
+            <span className="font-normal text-slate-400">
+              (optional · each word sense once · max {RELATIONS_MAX})
+            </span>
           </legend>
           <div className="space-y-3">
-            {senseRels.map((rel, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <select
-                  value={rel.relType}
-                  onChange={(e) =>
-                    setSenseRels((rs) =>
-                      rs.map((r, j) => (j === i ? { ...r, relType: e.target.value } : r))
-                    )
-                  }
-                  className="w-32 shrink-0 rounded-lg border border-slate-300 px-2 py-2 text-xs"
-                >
-                  {SENSE_REL_TYPES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-                <div className="min-w-0 flex-1">
-                  {rel.target ? (
-                    <div className="flex min-w-0 flex-1 items-center gap-1 rounded-lg bg-emerald-50 px-2 py-1.5 ring-1 ring-inset ring-emerald-200">
-                      <span className="font-bengali min-w-0 flex-1 truncate text-xs font-semibold text-emerald-900">
-                        {rel.label}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setSenseRels((rs) =>
-                            rs.map((r, j) =>
-                              j === i ? { ...r, target: "", label: "" } : r
-                            )
-                          )
-                        }
-                        className="shrink-0 text-[10px] font-bold text-emerald-700 hover:text-rose-600"
-                      >
-                        change
-                      </button>
-                    </div>
-                  ) : (
-                    <Autocomplete<WordHit>
-                      placeholder="Search Bengali word for sense target…"
-                      endpoint="/api/lookup/words"
-                      keyOf={(h) => h.senseId}
-                      onSelect={(h) =>
+            {senseRels.map((rel, i) => {
+              const rowError = shownError(`senseRelations.${i}`);
+              const used = usedSenseTargets(i);
+              return (
+                <div key={i}>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={rel.relType}
+                      onChange={(e) =>
                         setSenseRels((rs) =>
-                          rs.map((r, j) =>
-                            j === i
-                              ? { ...r, target: h.senseId, label: `${h.lemma} (${h.senseId})` }
-                              : r
-                          )
+                          rs.map((r, j) => (j === i ? { ...r, relType: e.target.value } : r))
                         )
                       }
-                      render={(h) => (
-                        <span>
-                          <span className="font-bengali font-semibold">{h.lemma}</span>{" "}
-                          <span className="rounded bg-slate-100 px-1 text-[10px] font-bold uppercase">
-                            {h.pos}
-                          </span>{" "}
-                          <span className="font-mono text-[10px] text-slate-400">{h.senseId}</span>
-                          {h.definition ? (
-                            <span className="font-bengali block text-xs text-slate-400">{h.definition}</span>
-                          ) : null}
-                        </span>
+                      aria-label={`Sense relation ${i + 1} type`}
+                      className="w-32 shrink-0 rounded-lg border border-slate-300 px-2 py-2 text-xs"
+                    >
+                      {SENSE_REL_TYPES.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                    <div className="min-w-0 flex-1">
+                      {rel.target ? (
+                        <div
+                          className={`flex min-w-0 flex-1 items-center gap-1 rounded-lg px-2 py-1.5 ring-1 ring-inset ${
+                            rowError ? "bg-red-50 ring-red-300" : "bg-emerald-50 ring-emerald-200"
+                          }`}
+                        >
+                          <span
+                            className={`font-bengali min-w-0 flex-1 truncate text-xs font-semibold ${
+                              rowError ? "text-red-900" : "text-emerald-900"
+                            }`}
+                          >
+                            {rel.label}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSenseRels((rs) =>
+                                rs.map((r, j) => (j === i ? { ...r, target: "", label: "" } : r))
+                              )
+                            }
+                            className="shrink-0 text-[10px] font-bold text-emerald-700 hover:text-red-600"
+                          >
+                            change
+                          </button>
+                        </div>
+                      ) : (
+                        <Autocomplete<WordHit>
+                          placeholder="Search Bengali word for sense target…"
+                          endpoint="/api/lookup/words"
+                          keyOf={(h) => h.senseId}
+                          invalid={Boolean(rowError)}
+                          disabledReason={(h) =>
+                            used.has(h.senseId) ? `Already used in row ${used.get(h.senseId)! + 1}` : null
+                          }
+                          onSelect={(h) =>
+                            setSenseRels((rs) =>
+                              rs.map((r, j) =>
+                                j === i
+                                  ? { ...r, target: h.senseId, label: `${h.lemma} (${h.senseId})` }
+                                  : r
+                              )
+                            )
+                          }
+                          render={(h) => (
+                            <span>
+                              <span className="font-bengali font-semibold">{h.lemma}</span>{" "}
+                              <span className="rounded bg-slate-100 px-1 text-[10px] font-bold uppercase">
+                                {h.pos}
+                              </span>{" "}
+                              <NewBadge origin={h.origin} />{" "}
+                              <span className="font-mono text-[10px] text-slate-400">{h.senseId}</span>
+                              {h.definition ? (
+                                <span className="font-bengali block text-xs text-slate-400">{h.definition}</span>
+                              ) : null}
+                            </span>
+                          )}
+                        />
                       )}
-                    />
-                  )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSenseRels((rs) => rs.filter((_, j) => j !== i))}
+                      className="shrink-0 text-slate-400 hover:text-red-600"
+                      aria-label={`Remove sense relation ${i + 1}`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  {fieldError(`senseRelations.${i}`)}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setSenseRels((rs) => rs.filter((_, j) => j !== i))}
-                  className="shrink-0 text-slate-400 hover:text-rose-600"
-                  aria-label="Remove relation"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
+              );
+            })}
             <button
               type="button"
+              disabled={senseRels.length >= RELATIONS_MAX}
               onClick={() =>
                 setSenseRels((rs) => [...rs, { relType: "derivation", target: "", label: "" }])
               }
-              className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs font-semibold text-slate-500 transition hover:border-emerald-400 hover:text-emerald-700"
+              className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs font-semibold text-slate-500 transition hover:border-emerald-400 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               + Add sense relation
             </button>
@@ -1229,93 +1451,127 @@ export function QuickInputForm({
         </fieldset>
 
         {/* Synset relations */}
-        <fieldset className="rounded-2xl border border-slate-200 p-5">
+        <fieldset
+          className={`rounded-2xl border p-5 ${
+            Object.keys(allErrors).some((k) => k.startsWith("synsetRelations"))
+              ? "border-red-200"
+              : "border-slate-200"
+          }`}
+        >
           <legend className="px-2 text-sm font-bold text-slate-700">
-            Synset relations <span className="font-normal text-slate-400">(optional)</span>
+            Synset relations{" "}
+            <span className="font-normal text-slate-400">
+              (optional · each concept once · max {RELATIONS_MAX})
+            </span>
           </legend>
           <div className="space-y-3">
-            {synsetRels.map((rel, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <select
-                  value={rel.relType}
-                  onChange={(e) =>
-                    setSynsetRels((rs) =>
-                      rs.map((r, j) => (j === i ? { ...r, relType: e.target.value } : r))
-                    )
-                  }
-                  className="w-32 shrink-0 rounded-lg border border-slate-300 px-2 py-2 text-xs"
-                >
-                  {SYNSET_REL_TYPES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-                <div className="min-w-0 flex-1">
-                  {rel.target ? (
-                    <div className="flex min-w-0 flex-1 items-center gap-1 rounded-lg bg-emerald-50 px-2 py-1.5 ring-1 ring-inset ring-emerald-200">
-                      <span className="font-bengali min-w-0 flex-1 truncate text-xs font-semibold text-emerald-900">
-                        {rel.label}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setSynsetRels((rs) =>
-                            rs.map((r, j) =>
-                              j === i ? { ...r, target: "", label: "" } : r
-                            )
-                          )
-                        }
-                        className="shrink-0 text-[10px] font-bold text-emerald-700 hover:text-rose-600"
-                      >
-                        change
-                      </button>
-                    </div>
-                  ) : (
-                    <Autocomplete<SynsetHit>
-                      placeholder="Search by word, synset ID, or definition…"
-                      endpoint="/api/lookup/synsets"
-                      keyOf={(h) => h.id}
-                      onSelect={(h) =>
+            {synsetRels.map((rel, i) => {
+              const rowError = shownError(`synsetRelations.${i}`);
+              const used = usedSynsetTargets(i);
+              const linkedId = synsetAction === "link" ? selectedSynset?.id : undefined;
+              return (
+                <div key={i}>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={rel.relType}
+                      onChange={(e) =>
                         setSynsetRels((rs) =>
-                          rs.map((r, j) =>
-                            j === i
-                              ? { ...r, target: h.id, label: `${h.words.join(", ") || h.id} (${h.id})` }
-                              : r
-                          )
+                          rs.map((r, j) => (j === i ? { ...r, relType: e.target.value } : r))
                         )
                       }
-                      render={(h) => (
-                        <span>
-                          <span className="font-mono text-xs font-bold text-emerald-700">{h.id}</span>{" "}
-                          <span className="rounded bg-slate-100 px-1 text-[10px] font-bold uppercase">
-                            {h.pos}
-                          </span>{" "}
-                          <span className="font-bengali">{h.words.join(", ")}</span>
-                          {h.definition ? (
-                            <span className="font-bengali block text-xs text-slate-400">
-                              {h.definition}
+                      aria-label={`Synset relation ${i + 1} type`}
+                      className="w-32 shrink-0 rounded-lg border border-slate-300 px-2 py-2 text-xs"
+                    >
+                      {SYNSET_REL_TYPES.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                    <div className="min-w-0 flex-1">
+                      {rel.target ? (
+                        <div
+                          className={`flex min-w-0 flex-1 items-center gap-1 rounded-lg px-2 py-1.5 ring-1 ring-inset ${
+                            rowError ? "bg-red-50 ring-red-300" : "bg-emerald-50 ring-emerald-200"
+                          }`}
+                        >
+                          <span
+                            className={`font-bengali min-w-0 flex-1 truncate text-xs font-semibold ${
+                              rowError ? "text-red-900" : "text-emerald-900"
+                            }`}
+                          >
+                            {rel.label}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSynsetRels((rs) =>
+                                rs.map((r, j) => (j === i ? { ...r, target: "", label: "" } : r))
+                              )
+                            }
+                            className="shrink-0 text-[10px] font-bold text-emerald-700 hover:text-red-600"
+                          >
+                            change
+                          </button>
+                        </div>
+                      ) : (
+                        <Autocomplete<SynsetHit>
+                          placeholder="Search by word, synset ID, or definition…"
+                          endpoint="/api/lookup/synsets"
+                          keyOf={(h) => h.id}
+                          invalid={Boolean(rowError)}
+                          disabledReason={(h) =>
+                            h.id === linkedId
+                              ? "This is the synset your word is linked to"
+                              : used.has(h.id)
+                                ? `Already used in row ${used.get(h.id)! + 1}`
+                                : null
+                          }
+                          onSelect={(h) =>
+                            setSynsetRels((rs) =>
+                              rs.map((r, j) =>
+                                j === i
+                                  ? { ...r, target: h.id, label: `${h.words.join(", ") || h.id} (${h.id})` }
+                                  : r
+                              )
+                            )
+                          }
+                          render={(h) => (
+                            <span>
+                              <span className="font-mono text-xs font-bold text-emerald-700">{h.id}</span>{" "}
+                              <span className="rounded bg-slate-100 px-1 text-[10px] font-bold uppercase">
+                                {h.pos}
+                              </span>{" "}
+                              <NewBadge origin={h.origin} />{" "}
+                              <span className="font-bengali">{h.words.join(", ")}</span>
+                              {h.definition ? (
+                                <span className="font-bengali block text-xs text-slate-400">
+                                  {h.definition}
+                                </span>
+                              ) : null}
                             </span>
-                          ) : null}
-                        </span>
+                          )}
+                        />
                       )}
-                    />
-                  )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSynsetRels((rs) => rs.filter((_, j) => j !== i))}
+                      className="shrink-0 text-slate-400 hover:text-red-600"
+                      aria-label={`Remove synset relation ${i + 1}`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  {fieldError(`synsetRelations.${i}`)}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setSynsetRels((rs) => rs.filter((_, j) => j !== i))}
-                  className="shrink-0 text-slate-400 hover:text-rose-600"
-                  aria-label="Remove relation"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
+              );
+            })}
             <button
               type="button"
+              disabled={synsetRels.length >= RELATIONS_MAX}
               onClick={() =>
                 setSynsetRels((rs) => [...rs, { relType: "hypernym", target: "", label: "" }])
               }
-              className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs font-semibold text-slate-500 transition hover:border-emerald-400 hover:text-emerald-700"
+              className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs font-semibold text-slate-500 transition hover:border-emerald-400 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               + Add synset relation
             </button>
@@ -1324,80 +1580,43 @@ export function QuickInputForm({
         </fieldset>
       </div>
 
-      {/* Notes */}
-      <div>
-        <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-          Notes for reviewers{" "}
-          <span className="font-normal text-slate-400">
-            (optional — internal, never exported to XML)
-          </span>
-        </label>
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          maxLength={500}
-          rows={2}
-          className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
-        />
-      </div>
-
-      {/* SM direct approval */}
-      {isModerator && !src ? (
-        <div className="rounded-2xl border border-purple-200 bg-purple-50/60 p-5">
-          <label className="flex items-center gap-2 text-sm font-bold text-purple-900">
-            <input
-              type="checkbox"
-              checked={directApprove}
-              onChange={(e) => setDirectApprove(e.target.checked)}
-              className="h-4 w-4 accent-purple-700"
-            />
-            ⚡ Direct Approval — promote immediately to VALIDATED, bypassing LE
-            and CLE review
+      {/* Direct-validating roles have no reviewer to address. */}
+      {!isModerator ? (
+        <div>
+          <label className="mb-1.5 block text-sm font-semibold text-slate-700">
+            Notes for reviewers{" "}
+            <span className="font-normal text-slate-400">
+              (optional — internal, never exported to XML · max {NOTE_MAX})
+            </span>
           </label>
-          {directApprove ? (
-            <div className="mt-3">
-              <textarea
-                value={justification}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setJustification(v);
-                  setErrors((prev) => {
-                    const n = { ...prev };
-                    if (v.trim().length > 0 && v.trim().length < 20) {
-                      n.directApproveJustification = `Justification needs at least 20 characters (${v.trim().length}/20).`;
-                    } else {
-                      delete n.directApproveJustification;
-                    }
-                    return n;
-                  });
-                }}
-                rows={2}
-                placeholder="Mandatory written justification (minimum 20 characters)…"
-                className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:ring-2 ${
-                  errors.directApproveJustification
-                    ? "border-rose-400 focus:ring-rose-200"
-                    : "border-purple-300 focus:ring-purple-200"
-                }`}
-              />
-              {fieldError("directApproveJustification")}
-            </div>
-          ) : null}
+          <textarea
+            value={note}
+            onChange={(e) => {
+              setNote(e.target.value);
+              touch("reviewerNote");
+            }}
+            maxLength={NOTE_MAX + 50}
+            rows={2}
+            aria-invalid={Boolean(shownError("reviewerNote")) || undefined}
+            className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none transition focus:ring-2 ${inputBorder("reviewerNote")}`}
+          />
+          {fieldError("reviewerNote")}
         </div>
       ) : null}
 
       {/* CAPTCHA simulation */}
       {!isModerator ? (
-        <label className="flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-slate-300 bg-white px-4 py-3 shadow-sm">
+        <label
+          className={`flex w-fit cursor-pointer items-center gap-3 rounded-xl border bg-white px-4 py-3 shadow-sm ${
+            captcha ? "border-emerald-300" : "border-slate-300"
+          }`}
+        >
           <input
             type="checkbox"
             checked={captcha}
             onChange={(e) => {
               setCaptcha(e.target.checked);
-              setErrors((prev) => {
-                const n = { ...prev };
-                delete n.captcha;
-                return n;
-              });
+              setFormError(null);
             }}
             className="h-5 w-5 accent-emerald-700"
           />
@@ -1410,50 +1629,85 @@ export function QuickInputForm({
         </label>
       ) : null}
 
-      {src ? (
-        <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
-          <button
-            type="submit"
-            disabled={busy || !hasChanges}
-            title={hasChanges ? undefined : "Edit the entry to enable Resubmit"}
-            className="rounded-xl bg-emerald-700 px-7 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-emerald-700"
+      <div className="space-y-3 border-t border-slate-100 pt-5">
+        {blockers.length > 0 || validating ? (
+          <div
+            aria-live="polite"
+            className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs"
           >
-            {busy ? "Resubmitting…" : "↻ Resubmit"}
-          </button>
-          <Link
-            href={`/dashboard/submissions/${encodeURIComponent(src.id)}`}
-            className="rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-          >
-            Cancel
-          </Link>
-        </div>
-      ) : (
-      <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
-        <button
-          type="submit"
-          disabled={busy}
-          className="rounded-xl bg-emerald-700 px-7 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 disabled:opacity-50"
-        >
-          {busy
-            ? "Submitting…"
-            : isModerator && directApprove
-              ? "Submit & Validate directly"
-              : "Submit for Review"}
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => requestSubmit(true)}
-          className="rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
-        >
-          Save as Draft
-        </button>
-        <p className="text-[11px] text-slate-400">
-          Server checks: honeypot → timing (too fast → UNDER_REVIEW) → CAPTCHA →
-          duplicate detection.
-        </p>
+            <p className="font-semibold text-slate-700">
+              {blockers.length > 0
+                ? `${
+                    src
+                      ? isModerator ? "Resubmit & Validate" : "Resubmit"
+                      : isModerator ? "Submit & Validate and Save as Draft" : "Submit and Save as Draft"
+                  } will be enabled when:`
+                : "Checking the entry against the database…"}
+            </p>
+            {blockers.length > 0 ? (
+              <ul className="mt-1.5 space-y-1">
+                {blockers.map((b) => (
+                  <li key={b.key} className="font-bengali flex items-start gap-1.5 text-red-600">
+                    <span aria-hidden="true">•</span>
+                    <span>{b.text}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {serverFailed ? (
+              <button
+                type="button"
+                onClick={() => setRetryTick((t) => t + 1)}
+                className="mt-2 rounded-lg bg-white px-3 py-1.5 font-bold text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-100"
+              >
+                Retry check
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-xs font-semibold text-emerald-700">
+            {`✓ All checks passed — ready to ${src ? "resubmit" : "submit"}${
+              isModerator ? " and validate directly" : ""
+            }.`}
+          </p>
+        )}
+
+        {src ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              disabled={!canSubmit}
+              className="rounded-xl bg-emerald-700 px-7 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-emerald-700"
+            >
+              {busy ? "Resubmitting…" : isModerator ? "⚡ Resubmit & Validate" : "↻ Resubmit"}
+            </button>
+            <Link
+              href={`/dashboard/submissions/${encodeURIComponent(src.id)}`}
+              className="rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              Cancel
+            </Link>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              disabled={!canSubmit}
+              className="rounded-xl bg-emerald-700 px-7 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-emerald-700"
+            >
+              {busy ? "Submitting…" : isModerator ? "⚡ Submit & Validate" : "Submit for Review"}
+            </button>
+            <button
+              type="button"
+              disabled={!canSubmit}
+              onClick={() => requestSubmit(true)}
+              className="rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
+            >
+              Save as Draft
+            </button>
+          </div>
+        )}
       </div>
-      )}
     </form>
   );
 }

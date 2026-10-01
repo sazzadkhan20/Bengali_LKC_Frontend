@@ -41,16 +41,21 @@ export function ReviewActions({
   actions,
   reviewers,
   assignedTo,
+  overrideTargets,
 }: {
   submissionId: string;
   actions: ActionSpec[];
   reviewers?: { id: string; name: string }[];
   assignedTo?: string | null;
+  overrideTargets?: EntryState[];
 }) {
   const router = useRouter();
+  const targets = overrideTargets?.length ? overrideTargets : ALL_STATES;
   const [active, setActive] = useState<ActionSpec | null>(null);
   const [comment, setComment] = useState("");
-  const [targetState, setTargetState] = useState<EntryState>("PENDING_REVIEW");
+  const [targetState, setTargetState] = useState<EntryState>(
+    targets.includes("PENDING_REVIEW") ? "PENDING_REVIEW" : targets[0]
+  );
   const [assignTo, setAssignTo] = useState(assignedTo ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -149,7 +154,7 @@ export function ReviewActions({
             onChange={(e) => setTargetState(e.target.value as EntryState)}
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
           >
-            {ALL_STATES.map((s) => (
+            {targets.map((s) => (
               <option key={s} value={s}>
                 {s}
               </option>

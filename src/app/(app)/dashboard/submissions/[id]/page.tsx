@@ -26,6 +26,11 @@ import {
   OwnerActionsPanel,
   type OwnerActions,
 } from "@/components/dashboard/OwnerActionsPanel";
+import {
+  FinalStatusNotice,
+  ManagerActionsPanel,
+  type Lifecycle,
+} from "@/components/dashboard/ManagerActionsPanel";
 import type { EntryState, POS, Role, Session, Submission } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Submission" };
@@ -81,6 +86,8 @@ type SubmissionDetail = Omit<Submission, "history"> & {
   /** Present only for the entry's owner. */
   ownerActions?: OwnerActions;
   version?: number | null;
+  assignedChief?: string | null;
+  lifecycle?: Lifecycle;
 };
 
 const CASE_STAGE: Record<string, string> = {
@@ -89,16 +96,20 @@ const CASE_STAGE: Record<string, string> = {
   TIE_PENDING: "awaiting a tie-break decision",
 };
 
-/** Staff actions for this user; the owner's own actions come from `ownerActions`. */
+/**
+ * Staff actions for roles without a server review policy; Platform Architect / System Moderator use
+ * `ManagerActionsPanel` and the owner's own actions come from `ownerActions`.
+ */
 function actionsFor(
   session: Session,
   sub: Pick<Submission, "state">,
-  hasReviewPolicy: boolean
+  hasReviewPolicy: boolean,
+  isFinal: boolean
 ): ActionSpec[] {
   const role = session.role;
   const actions: ActionSpec[] = [];
   // Review decisions for policy roles come from the review API instead.
-  if (hasReviewPolicy) return actions;
+  if (hasReviewPolicy || isFinal) return actions;
 
   if (sub.state === "PENDING_REVIEW" && hasPermission(role, "primary_validate")) {
     actions.push(
@@ -124,25 +135,6 @@ function actionsFor(
       needsComment: true,
       minComment: 30,
       commentLabel: "Escalation notes",
-    });
-  }
-  if (sub.state === "UNDER_REVIEW" && hasPermission(role, "override_state")) {
-    actions.push({
-      action: "clear_under_review",
-      label: "🧹 Clear Anti-Bot Hold",
-      tone: "green",
-    });
-  }
-  if (hasPermission(role, "override_state")) {
-    actions.push({
-      action: "override",
-      label: "⚠ Emergency Override",
-      tone: "slate",
-      needsComment: true,
-      minComment: 1,
-      commentLabel: "An override reason",
-      needsTargetState: true,
-      confirm: "Emergency state overrides are permanently logged in the audit trail. Continue?",
     });
   }
   return actions;
@@ -205,7 +197,34 @@ export default async function SubmissionDetailPage({
   );
   if (result.status === 404) notFound();
   if (result.status === 401) redirect("/login");
-  if (result.status === 403) redirect("/dashboard");
+  if (result.status === 403) {
+    const isReviewer = session.role === "LEXICAL_EDITOR" || session.role === "CHIEF_LEXICAL_EDITOR";
+    if (!isReviewer) redirect("/dashboard");
+    return (
+      <div className="mx-auto max-w-3xl">
+        <PageTitle title="Entry not available" subtitle={`Submission ${id}`} />
+        <Card>
+          <div className="flex items-start gap-3 p-5 text-sm text-slate-700">
+            <span aria-hidden="true" className="text-lg leading-none">
+              🔒
+            </span>
+            <div className="space-y-3">
+              <p>
+                {(result.data as { error?: string }).error ??
+                  "You do not have access to this entry."}
+              </p>
+              <Link
+                href="/dashboard/queue"
+                className="inline-block text-xs font-semibold text-emerald-700 hover:underline"
+              >
+                ← Back to the review queue
+              </Link>
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
   if (!result.ok) {
     throw new Error(
       (result.data as { error?: string }).error ?? "Could not load submission."
@@ -216,13 +235,15 @@ export default async function SubmissionDetailPage({
     userId ? (sub.users[userId]?.name ?? userId) : "";
 
   const synset = sub.synset;
-  const actions = actionsFor(session, sub, Boolean(sub.review));
+  const isFinal = sub.lifecycle?.final ?? (sub.state === "VALIDATED" || sub.state === "REJECTED");
+  const isManager = hasPermission(session.role, "override_state");
+  const actions = isManager ? [] : actionsFor(session, sub, Boolean(sub.review), isFinal);
   const ownerActions = sub.ownerActions?.actions ?? [];
   const activeCase = sub.ownerActions?.activeCase;
-  const reviewers = sub.reviewers?.map((u) => ({
-    id: u.id,
-    name: `${u.name} (${ROLE_LABEL[u.role]})`,
-  }));
+  const assignedNames = [
+    sub.assignedTo ? `${nameOf(sub.assignedTo)} (Lexical Editor)` : null,
+    sub.assignedChief ? `${nameOf(sub.assignedChief)} (Chief)` : null,
+  ].filter(Boolean) as string[];
   const showReview = Boolean(
     sub.review && (sub.review.blockedReason || sub.review.decisions.length > 0)
   );
@@ -268,8 +289,9 @@ export default async function SubmissionDetailPage({
             hint: sub.submittedForReviewAt ? timeAgo(sub.submittedForReviewAt) : "still a draft",
           },
           {
-            label: "Assigned reviewer",
-            value: sub.assignedTo ? nameOf(sub.assignedTo) : "Unassigned",
+            label: "Assigned reviewers",
+            value: assignedNames.length ? assignedNames[0] : "Unassigned",
+            hint: assignedNames[1],
           },
           {
             label: "Last updated",
@@ -626,23 +648,32 @@ export default async function SubmissionDetailPage({
         </Card>
       ) : null}
 
-      {/* staff actions */}
-      {actions.length > 0 || reviewers ? (
+      {/* Platform Architect / System Moderator: drafts belong to their owner, so nothing is offered there. */}
+      {isManager && sub.state !== "DRAFT" && sub.lifecycle ? (
+        <ManagerActionsPanel
+          submissionId={sub.id}
+          version={sub.version}
+          state={sub.state}
+          lifecycle={sub.lifecycle}
+          reviewers={sub.reviewers ?? []}
+          assignedEditor={sub.assignedTo ?? null}
+          assignedChief={sub.assignedChief ?? null}
+        />
+      ) : null}
+
+      {!isManager && actions.length > 0 ? (
         <Card className="mt-6">
           <CardHeader
             title="Available actions"
             subtitle={`Permitted for your role (${ROLE_LABEL[session.role]}) in state ${sub.state}`}
           />
           <div className="p-5">
-            <ReviewActions
-              submissionId={sub.id}
-              actions={actions}
-              reviewers={reviewers}
-              assignedTo={sub.assignedTo}
-            />
+            <ReviewActions submissionId={sub.id} actions={actions} />
           </div>
         </Card>
       ) : null}
+
+      {!isManager && isFinal ? <FinalStatusNotice state={sub.state} /> : null}
     </div>
   );
 }

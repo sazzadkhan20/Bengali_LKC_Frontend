@@ -159,12 +159,6 @@ export default async function QuickInputPage({
         title="Quick Input — New Lexical Entry"
         subtitle="Enter a complete lexical record (word + POS + synset linkage + definition + relations) in a single submission. Bengali Unicode is supported natively. Lookups run against the full UKC lexicon."
       />
-      {session.role === "PLATFORM_ARCHITECT" ? (
-        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Platform Architect may use Quick Input for emergency corrections.
-          Direct validation (bypass) is available when justified.
-        </div>
-      ) : null}
       {session.role === "CONTRIBUTOR" ? (
         <div className="mb-5 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-800">
           Daily entry limits and minimum form time apply. Submissions that are

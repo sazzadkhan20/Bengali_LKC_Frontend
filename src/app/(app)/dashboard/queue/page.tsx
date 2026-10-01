@@ -34,7 +34,7 @@ export default async function QueuePage({
       <div className="mx-auto max-w-6xl">
         <PageTitle
           title="Queue Management"
-          subtitle="View, filter, assign and override user-submitted entries in any validation state."
+          subtitle="View, filter, assign and override user-submitted entries. Validated entries are final and cannot be overridden."
         />
         <SubmissionBrowser
           mode="manage"
@@ -43,7 +43,7 @@ export default async function QueuePage({
           emptyMessage="No entries in this state."
         />
         <p className="mt-3 text-xs text-slate-400">
-          Open an entry to review it, assign it, or override its state.
+          Open an entry to review it, assign it, or override its state. Validated entries are final.
         </p>
       </div>
     );
@@ -70,6 +70,8 @@ export default async function QueuePage({
         initialAssignedToMe={params.assigned === "me"}
         initialQuery={initialQuery}
         emptyMessage="The queue is empty."
+        currentUserId={session.userId}
+        reviewerSlot={isEditor ? "editor" : "chief"}
       />
     </div>
   );

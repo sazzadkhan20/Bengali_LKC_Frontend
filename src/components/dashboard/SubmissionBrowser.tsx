@@ -25,6 +25,8 @@ type Row = {
   contributorName: string | null;
   assignedTo: string | null;
   assignedToName: string | null;
+  assignedChief: string | null;
+  assignedChiefName: string | null;
   lastUpdatedBy: string | null;
   lastUpdatedByName: string | null;
   createdAt: string;
@@ -38,6 +40,8 @@ type BrowseResponse = {
   totalElements: number;
   totalPages: number;
   lastUpdatedAt: string | null;
+  /** Review mode only: entries visible to the caller and how many of them are assigned to the caller. */
+  scopeCounts?: { available: number; assignedToMe: number };
 };
 
 const PAGE_SIZES = [15, 30, 50, 100] as const;
@@ -52,6 +56,8 @@ export function SubmissionBrowser({
   initialAssignedToMe = false,
   initialQuery = "",
   emptyMessage = "Nothing here yet.",
+  currentUserId,
+  reviewerSlot,
 }: {
   mode: BrowserMode;
   fixedState?: EntryState;
@@ -59,6 +65,9 @@ export function SubmissionBrowser({
   initialAssignedToMe?: boolean;
   initialQuery?: string;
   emptyMessage?: string;
+  currentUserId?: string;
+  /** Review mode: which assignment slot belongs to the viewer's role. */
+  reviewerSlot?: "editor" | "chief";
 }) {
   const [searchInput, setSearchInput] = useState(initialQuery);
   const [q, setQ] = useState(initialQuery.trim());
@@ -233,27 +242,37 @@ export function SubmissionBrowser({
         </div>
 
         {mode === "review" ? (
-          <div role="radiogroup" aria-label="Queue scope" className="flex gap-1.5">
-            {[
-              { value: false, label: "Full queue" },
-              { value: true, label: "Assigned to me" },
-            ].map((opt) => (
-              <label key={opt.label} className="cursor-pointer">
-                <input
-                  type="radio"
-                  name="queue-scope"
-                  className="peer sr-only"
-                  checked={assignedToMe === opt.value}
-                  onChange={() => {
-                    setPage(0);
-                    setAssignedToMe(opt.value);
-                  }}
-                />
-                <span className="inline-block rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-inset ring-slate-300 transition peer-checked:bg-slate-800 peer-checked:text-white peer-checked:ring-slate-800 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-400 hover:bg-slate-50 peer-checked:hover:bg-slate-800">
-                  {opt.label}
-                </span>
-              </label>
-            ))}
+          <div className="space-y-2">
+            <div role="radiogroup" aria-label="Queue scope" className="flex flex-wrap gap-1.5">
+              {[
+                { value: false, label: "Full queue", count: data?.scopeCounts?.available },
+                { value: true, label: "Assigned to me", count: data?.scopeCounts?.assignedToMe },
+              ].map((opt) => (
+                <label key={opt.label} className="cursor-pointer">
+                  <input
+                    type="radio"
+                    name="queue-scope"
+                    className="peer sr-only"
+                    checked={assignedToMe === opt.value}
+                    onChange={() => {
+                      setPage(0);
+                      setAssignedToMe(opt.value);
+                    }}
+                  />
+                  <span className="inline-block rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-inset ring-slate-300 transition peer-checked:bg-slate-800 peer-checked:text-white peer-checked:ring-slate-800 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-400 hover:bg-slate-50 peer-checked:hover:bg-slate-800">
+                    {opt.label}
+                    {typeof opt.count === "number" ? (
+                      <span className="ml-1.5 tabular-nums opacity-70">{opt.count}</span>
+                    ) : null}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-slate-500">
+              {assignedToMe
+                ? "Entries a System Moderator or Platform Architect assigned to you."
+                : "Unassigned entries plus those assigned to you. Entries assigned to another reviewer are not shown."}
+            </p>
           </div>
         ) : (
           <div role="radiogroup" aria-label="Filter by state" className="flex flex-wrap gap-1.5">
@@ -313,7 +332,11 @@ export function SubmissionBrowser({
             ) : items.length === 0 ? (
               <tr>
                 <td colSpan={columns} className="px-5 py-8 text-center text-sm italic text-slate-400">
-                  {q ? "No entries match your search." : emptyMessage}
+                  {q
+                    ? "No entries match your search."
+                    : mode === "review" && assignedToMe
+                      ? "No entries are assigned to you right now."
+                      : emptyMessage}
                 </td>
               </tr>
             ) : (
@@ -341,8 +364,23 @@ export function SubmissionBrowser({
                   ) : null}
                   {showAssigned ? (
                     <td className="px-3 py-3 text-xs text-slate-500">
-                      {s.assignedTo ? (
-                        (s.assignedToName ?? s.assignedTo)
+                      {s.assignedTo || s.assignedChief ? (
+                        <span className="space-y-0.5">
+                          {s.assignedTo ? (
+                            <span className="block">
+                              <span className="text-slate-400">LE · </span>
+                              {s.assignedToName ?? s.assignedTo}
+                              {reviewerSlot === "editor" && s.assignedTo === currentUserId ? <YouBadge /> : null}
+                            </span>
+                          ) : null}
+                          {s.assignedChief ? (
+                            <span className="block">
+                              <span className="text-slate-400">CLE · </span>
+                              {s.assignedChiefName ?? s.assignedChief}
+                              {reviewerSlot === "chief" && s.assignedChief === currentUserId ? <YouBadge /> : null}
+                            </span>
+                          ) : null}
+                        </span>
                       ) : (
                         <span className="text-slate-300">—</span>
                       )}
@@ -412,5 +450,13 @@ export function SubmissionBrowser({
         </button>
       </div>
     </section>
+  );
+}
+
+function YouBadge() {
+  return (
+    <span className="ml-1.5 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">
+      You
+    </span>
   );
 }

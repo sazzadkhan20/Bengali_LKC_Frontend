@@ -13,15 +13,11 @@ export default async function ExportPage() {
   if (!session) redirect("/login");
   if (!hasPermission(session.role, "xml_export")) redirect("/dashboard");
 
-  const validatedCount = store.submissions.filter(
-    (s) => s.state === "VALIDATED"
-  ).length;
-
   return (
     <div className="mx-auto max-w-4xl">
       <PageTitle
         title="UKC LMF XML Export"
-        subtitle={`Generates a well-formed LMF file in the exact format of Bangla_Mono_Lingual_Lexicons.xml. Only VALIDATED entries are exported — currently ${validatedCount} crowdsourced entries qualify alongside the canonical lexicon.`}
+        subtitle="Generates a well-formed LMF file in the exact format of Bangla_Mono_Lingual_Lexicons.xml from the lexicon: the imported XML data plus every entry that passed final validation, each with its permanent ID. Run a dry run to see the current counts."
       />
 
       <Card>
