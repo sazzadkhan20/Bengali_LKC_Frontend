@@ -10,26 +10,44 @@ const POS_OPTIONS: { value: POS; label: string }[] = [
   { value: "r", label: "Adverbs" },
 ];
 
-type ExportMode = "all" | "new";
+type ExportOrigin = "all" | "xml" | "user";
+
+const ORIGIN_OPTIONS: { value: ExportOrigin; title: string; desc: string }[] = [
+  {
+    value: "all",
+    title: "Export All Data",
+    desc: "Imported XML lexicon plus every entry validated on this platform — full UKC-ready dump.",
+  },
+  {
+    value: "user",
+    title: "Export Only New Data",
+    desc: "Only entries added through the platform after final validation, with their permanent IDs.",
+  },
+  {
+    value: "xml",
+    title: "Export Only XML Data",
+    desc: "Only the originally imported lexicon, without platform additions.",
+  },
+];
 
 interface DryRunResult {
   projected: { entries: number; crowdsourced: number; synsets: number };
-  config?: { mode?: string };
+  config?: { origin?: string };
 }
 
 export function ExportPanel() {
   const [version, setVersion] = useState("1.1");
   const [pos, setPos] = useState<POS[]>([]);
-  const [mode, setMode] = useState<ExportMode>("all");
+  const [origin, setOrigin] = useState<ExportOrigin>("all");
   const [lkcSource, setLkcSource] = useState(true);
   const [dryRun, setDryRun] = useState<DryRunResult | null>(null);
+  const [dryRunError, setDryRunError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const qs = () => {
     const p = new URLSearchParams();
     p.set("version", version);
-    p.set("mode", mode);
-    p.set("canonical", mode === "all" ? "1" : "0");
+    p.set("origin", origin);
     if (pos.length) p.set("pos", pos.join(","));
     if (lkcSource) p.set("lkcSource", "1");
     return p.toString();
@@ -37,9 +55,14 @@ export function ExportPanel() {
 
   async function runDry() {
     setBusy(true);
+    setDryRunError(null);
     try {
       const res = await fetch(`/api/export?dryRun=1&${qs()}`);
-      if (res.ok) setDryRun(await res.json());
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setDryRun(data);
+      else setDryRunError(data.error ?? "Dry run failed. Please try again.");
+    } catch {
+      setDryRunError("Network error — the dry run did not complete.");
     } finally {
       setBusy(false);
     }
@@ -51,35 +74,22 @@ export function ExportPanel() {
         <legend className="mb-2 text-sm font-semibold text-slate-700">
           Export scope
         </legend>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {(
-            [
-              {
-                value: "new" as const,
-                title: "Export Only New Data",
-                desc: "Only crowdsourced VALIDATED entries from this platform (no canonical seed lexicon).",
-              },
-              {
-                value: "all" as const,
-                title: "Export All Data",
-                desc: "Canonical lexicon plus all crowdsourced VALIDATED entries — full UKC-ready dump.",
-              },
-            ] as const
-          ).map((o) => (
+        <div className="grid gap-3 sm:grid-cols-3">
+          {ORIGIN_OPTIONS.map((o) => (
             <label
               key={o.value}
               className={`flex cursor-pointer gap-3 rounded-xl border p-4 transition ${
-                mode === o.value
+                origin === o.value
                   ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200"
                   : "border-slate-200 bg-white hover:border-emerald-300"
               }`}
             >
               <input
                 type="radio"
-                name="exportMode"
-                checked={mode === o.value}
+                name="exportOrigin"
+                checked={origin === o.value}
                 onChange={() => {
-                  setMode(o.value);
+                  setOrigin(o.value);
                   setDryRun(null);
                 }}
                 className="mt-1 h-4 w-4 accent-emerald-700"
@@ -153,7 +163,7 @@ export function ExportPanel() {
         <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
           <p className="font-bold">
             Dry-run projection ·{" "}
-            {mode === "all" ? "All Data" : "Only New Data"}
+            {ORIGIN_OPTIONS.find((o) => o.value === origin)?.title.replace("Export ", "")}
           </p>
           <ul className="mt-1 grid gap-1 sm:grid-cols-3">
             <li>
@@ -168,13 +178,18 @@ export function ExportPanel() {
               <strong>
                 {dryRun.projected.crowdsourced.toLocaleString()}
               </strong>{" "}
-              crowdsourced (new)
+              new senses from the platform
             </li>
           </ul>
           <p className="mt-1 text-xs">
             No file was generated and nothing was logged. Run the real export
             to download.
           </p>
+        </div>
+      ) : null}
+      {dryRunError ? (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+          {dryRunError}
         </div>
       ) : null}
 

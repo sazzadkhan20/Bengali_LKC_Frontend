@@ -8,6 +8,8 @@ export interface IliHit {
   words: string[];
   gloss: string;
   alreadyInBengali: boolean;
+  /** Submission that already proposes this ILI as a new synset, if any. */
+  proposedIn?: string | null;
 }
 
 const POS_OPTIONS: { value: string; label: string }[] = [
@@ -179,8 +181,17 @@ export function IliFinder({
                     <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 ring-1 ring-inset ring-amber-200">
                       already in Bengali LKC — link instead
                     </span>
+                  ) : h.proposedIn ? (
+                    <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 ring-1 ring-inset ring-amber-200">
+                      already proposed in {h.proposedIn}
+                    </span>
                   ) : null}
-                  {onSelect && !h.alreadyInBengali ? (
+                  {onSelect && h.proposedIn && !h.alreadyInBengali ? (
+                    <span className="ml-auto text-[11px] font-medium text-amber-700">
+                      Link to its synset once it is validated
+                    </span>
+                  ) : null}
+                  {onSelect && !h.alreadyInBengali && !h.proposedIn ? (
                     <button
                       type="button"
                       onClick={() => onSelect(h)}

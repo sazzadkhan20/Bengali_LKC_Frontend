@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useId, useMemo, useRef, useState } from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { STATE_LABEL } from "@/lib/format";
 import type { EntryState } from "@/lib/types";
+import { StateBadge } from "@/components/ui";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 
 export type OwnerActionName = "SUBMIT_DRAFT" | "DELETE_DRAFT" | "RESUBMIT" | "DISPUTE";
 
@@ -57,6 +59,8 @@ export function OwnerActionsPanel({
   const [note, setNote] = useState("");
   const [noteTouched, setNoteTouched] = useState(false);
   const [serverNoteError, setServerNoteError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<"SUBMIT_DRAFT" | "DELETE_DRAFT" | null>(null);
+  const closeConfirm = useCallback(() => setConfirming(null), []);
 
   const dispute = actions.find((a) => a.action === "DISPUTE");
   const noteMin = dispute?.noteMin ?? 15;
@@ -86,9 +90,6 @@ export function OwnerActionsPanel({
   }
 
   async function runDraftAction(action: "SUBMIT_DRAFT" | "DELETE_DRAFT") {
-    if (action === "DELETE_DRAFT" && !window.confirm("Delete this draft permanently? This cannot be undone.")) {
-      return;
-    }
     setBusy(action);
     setError(null);
     setSuccess(null);
@@ -105,14 +106,45 @@ export function OwnerActionsPanel({
         router.refresh();
         return;
       }
-      setSuccess(`Status changed to ${STATE_LABEL[data.state ?? "PENDING_REVIEW"] ?? data.state}.`);
+      setSuccess(
+        data.state === "VALIDATED"
+          ? "Status changed to Validated. The entry is now part of the lexicon and its status is final."
+          : `Status changed to ${STATE_LABEL[data.state ?? "PENDING_REVIEW"] ?? data.state}.`
+      );
       router.refresh();
     } catch {
       setError("Network error — nothing was changed. Please try again.");
     } finally {
       setBusy(null);
+      setConfirming(null);
     }
   }
+
+  const submitDraft = actions.find((a) => a.action === "SUBMIT_DRAFT");
+  const draftValidates = submitDraft?.toState === "VALIDATED";
+  const confirmCopy =
+    confirming === "DELETE_DRAFT"
+      ? {
+          title: "Delete this draft?",
+          description: "The draft is deleted permanently. This cannot be undone.",
+          confirmLabel: "Delete draft",
+          tone: "danger" as const,
+        }
+      : draftValidates
+        ? {
+            title: "Submit and validate directly?",
+            description:
+              "As a Platform Architect or System Moderator, your entry skips the Lexical Editor and Chief Lexical Editor review. Its status changes to Validated immediately and it is added to the lexicon with permanent IDs (included in search, linking and XML export).",
+            confirmLabel: "Yes, validate now",
+            tone: "primary" as const,
+          }
+        : {
+            title: "Submit this draft for review?",
+            description:
+              "The entry is checked again and, if it passes, its status changes to Pending Review and it goes to the Lexical Editor's review queue.",
+            confirmLabel: "Yes, submit for review",
+            tone: "primary" as const,
+          };
 
   async function submitDispute() {
     setNoteTouched(true);
@@ -159,6 +191,33 @@ export function OwnerActionsPanel({
 
   return (
     <div className="space-y-4">
+      <ConfirmModal
+        open={confirming !== null}
+        title={confirmCopy.title}
+        description={confirmCopy.description}
+        confirmLabel={confirmCopy.confirmLabel}
+        tone={confirmCopy.tone}
+        busy={busy !== null}
+        onConfirm={() => confirming && runDraftAction(confirming)}
+        onCancel={closeConfirm}
+      >
+        {confirming === "SUBMIT_DRAFT" && draftValidates ? (
+          <div className="mb-3 space-y-2">
+            <p className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-xs font-semibold text-purple-800">
+              ⚡ Direct validation — no review step follows this confirmation.
+            </p>
+            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">
+              🔒 Validation is final. Once validated, the status cannot be changed or overridden, and the
+              entry cannot be edited or withdrawn.
+            </p>
+          </div>
+        ) : null}
+        {confirming === "SUBMIT_DRAFT" && submitDraft?.toState ? (
+          <p className="flex items-center gap-2 text-sm text-slate-600">
+            New status: <StateBadge state={submitDraft.toState} />
+          </p>
+        ) : null}
+      </ConfirmModal>
       {success ? (
         <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 ring-1 ring-emerald-200">
           {success}
@@ -181,11 +240,15 @@ export function OwnerActionsPanel({
                   key={a.action}
                   type="button"
                   disabled={busy !== null}
-                  onClick={() => runDraftAction("SUBMIT_DRAFT")}
+                  onClick={() => setConfirming("SUBMIT_DRAFT")}
                   title={hint}
                   className="rounded-xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 disabled:opacity-50"
                 >
-                  {busy === a.action ? "Submitting…" : `✓ ${a.label}`}
+                  {busy === a.action
+                    ? "Submitting…"
+                    : draftValidates
+                      ? "⚡ Submit & Validate"
+                      : `✓ ${a.label}`}
                 </button>
               );
             case "DELETE_DRAFT":
@@ -194,7 +257,7 @@ export function OwnerActionsPanel({
                   key={a.action}
                   type="button"
                   disabled={busy !== null}
-                  onClick={() => runDraftAction("DELETE_DRAFT")}
+                  onClick={() => setConfirming("DELETE_DRAFT")}
                   className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-red-700 disabled:opacity-50"
                 >
                   {busy === a.action ? "Deleting…" : `✕ ${a.label}`}
