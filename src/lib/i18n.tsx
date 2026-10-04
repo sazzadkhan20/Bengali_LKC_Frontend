@@ -327,8 +327,8 @@ export const STRINGS = {
   navConfig: { en: "System Configuration", bn: "সিস্টেম কনফিগারেশন" },
   navArbitration: { en: "Arbitration", bn: "সালিশ" },
   navArbitrationTie: {
-    en: "Arbitration Tie-Breaker",
-    bn: "সালিশ টাই-ব্রেকার",
+    en: "Arbitration Oversight",
+    bn: "সালিশ তত্ত্বাবধান",
   },
   navCorrections: { en: "Pending Corrections", bn: "মুলতুবি সংশোধন" },
   navSubmissions: { en: "My Submissions", bn: "আমার জমা" },

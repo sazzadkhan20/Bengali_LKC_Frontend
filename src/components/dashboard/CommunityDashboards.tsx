@@ -1,112 +1,62 @@
 import Link from "next/link";
-import { activeCurators, store, userById } from "@/lib/store";
-import {
-  quorumInfo,
-  submissionsFor,
-  weeklySubmissionSeries,
-} from "@/lib/queries";
-import { timeAgo, nowMs } from "@/lib/format";
+import type { ContributorData, CuratorData } from "@/lib/dashboard";
+import { timeAgo } from "@/lib/format";
+import { ORIGIN_LABEL } from "@/lib/arbitration";
 import { Card, CardHeader, StatCard, StateBadge } from "@/components/ui";
 import { ColumnChart } from "@/components/charts";
 import { SubmissionTable } from "./SubmissionTable";
 import type { Session } from "@/lib/types";
+import { CaseList, EmptyRow, MiniStats, QuotaBar, ViewAll } from "./DashboardParts";
 
 /* ------------------------------------------------------------------ */
 /* Lexical Contributor dashboard (SRS §7.3.1)                          */
 /* ------------------------------------------------------------------ */
 
-export function ContributorDashboard({ session }: { session: Session }) {
-  const now = nowMs();
-  const mine = submissionsFor((s) => s.contributorId === session.userId);
-  const pending = mine.filter((s) =>
-    ["PENDING_REVIEW", "UNDER_REVIEW", "EDITOR_APPROVED"].includes(s.state)
-  ).length;
-  const validated = mine.filter((s) => s.state === "VALIDATED").length;
-  const rejected = mine.filter((s) => s.state === "REJECTED").length;
-  const flagged = mine.filter((s) =>
-    ["FLAGGED", "C_FLAGGED"].includes(s.state)
-  );
-  const myDisputes = store.cases.filter((c) => c.claimantId === session.userId);
-  const sessionUsed = Math.min(
-    mine.filter(
-      (s) => now - new Date(s.createdAt).getTime() < 24 * 3600 * 1000
-    ).length,
-    store.config.maxEntriesPerSession
-  );
-  const series = weeklySubmissionSeries(
-    8,
-    (s) => s.contributorId === session.userId
-  );
+export function ContributorDashboard({ data, now }: { session: Session; data: ContributorData; now: number }) {
+  const { counts, quota } = data;
+  const total = Object.entries(counts).reduce((acc, [state, n]) => (state === "DRAFT" ? acc : acc + n), 0);
+  const inReview = counts.PENDING_REVIEW + counts.UNDER_REVIEW + counts.EDITOR_APPROVED;
 
   return (
     <div className="space-y-6">
-      {/* ① contribution summary */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total submitted" value={mine.length} href="/dashboard/submissions" />
-        <StatCard label="Pending review" value={pending} tone="blue" href="/dashboard/submissions?state=PENDING_REVIEW" />
-        <StatCard label="Validated" value={validated} tone="green" href="/dashboard/submissions?state=VALIDATED" />
-        <StatCard label="Rejected" value={rejected} tone="red" href="/dashboard/submissions?state=REJECTED" />
+        <StatCard label="Total submitted" value={total} hint={counts.DRAFT > 0 ? `${counts.DRAFT} draft${counts.DRAFT === 1 ? "" : "s"} not yet submitted` : undefined} href="/dashboard/submissions" />
+        <StatCard label="In review" value={inReview} hint={counts.ARBITRATION > 0 ? `${counts.ARBITRATION} in arbitration` : undefined} tone="blue" href="/dashboard/submissions?state=PENDING_REVIEW" />
+        <StatCard label="Validated" value={counts.VALIDATED} tone="green" href="/dashboard/submissions?state=VALIDATED" />
+        <StatCard label="Rejected" value={counts.REJECTED} tone="red" href="/dashboard/submissions?state=REJECTED" />
       </div>
 
-      {/* ⑤ session quota + ⑥ quick input CTA */}
       <div className="grid gap-6 xl:grid-cols-3">
         <Card className="xl:col-span-2">
-          <CardHeader
-            title="Session quota"
-            subtitle="Anti-bot rate limits for your account"
-          />
-          <div className="space-y-5 p-5">
-            <div>
-              <div className="mb-1.5 flex justify-between text-xs">
-                <span className="font-semibold text-slate-600">
-                  This session
-                </span>
-                <span className="tabular-nums text-slate-400">
-                  {sessionUsed} / {store.config.maxEntriesPerSession}
-                </span>
-              </div>
-              <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-full rounded-full bg-emerald-600"
-                  style={{
-                    width: `${(sessionUsed / store.config.maxEntriesPerSession) * 100}%`,
-                  }}
-                />
-              </div>
-            </div>
-            <div>
-              <div className="mb-1.5 flex justify-between text-xs">
-                <span className="font-semibold text-slate-600">
-                  Rolling 24 hours
-                </span>
-                <span className="tabular-nums text-slate-400">
-                  {sessionUsed} / {store.config.maxEntriesPerDay}
-                </span>
-              </div>
-              <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-full rounded-full bg-sky-500"
-                  style={{
-                    width: `${(sessionUsed / store.config.maxEntriesPerDay) * 100}%`,
-                  }}
-                />
-              </div>
-            </div>
-            <p className="text-[11px] text-slate-400">
-              Exceeding {store.config.suspensionThreshold} entries in any
-              window triggers automatic account suspension pending Platform
-              Architect review.
-            </p>
+          <CardHeader title="Submission quota" subtitle="Anti-bot rate limits for your account" />
+          <div className="space-y-5 p-4 sm:p-5">
+            <QuotaBar
+              label="This session"
+              used={quota.sessionUsed}
+              limit={quota.sessionLimit}
+              color="bg-emerald-600"
+              hint={quota.sessionStartedAt ? `Since you signed in ${timeAgo(quota.sessionStartedAt)}` : undefined}
+            />
+            <QuotaBar label="Rolling 24 hours" used={quota.dayUsed} limit={quota.dayLimit} color="bg-sky-500" />
+            {quota.blocked > 0 ? (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-800 ring-1 ring-inset ring-red-200">
+                {quota.blocked} submission attempt{quota.blocked === 1 ? " was" : "s were"} blocked by a limit in the last 24
+                hours. Your attempts in this window: {quota.attempts} of {quota.suspensionThreshold} — reaching{" "}
+                {quota.suspensionThreshold} suspends your account until the Platform Architect reviews it.
+              </p>
+            ) : (
+              <p className="text-[11px] leading-relaxed text-slate-400">
+                Entries plus attempts blocked by a limit count towards automatic suspension at {quota.suspensionThreshold}{" "}
+                within 24 hours. After {quota.anomalyThresholdPerHour} entries within an hour, further entries are held for
+                moderator review.
+              </p>
+            )}
           </div>
         </Card>
 
-        <Card className="flex flex-col items-center justify-center bg-gradient-to-br from-emerald-700 to-emerald-800 p-8 text-center">
-          <p className="font-bengali text-2xl font-bold text-white">
-            নতুন শব্দ যোগ করুন
-          </p>
-          <p className="mt-1 text-xs text-emerald-100">
-            Add a new Bengali lexical entry via Quick Input
-          </p>
+        <Card className="flex flex-col items-center justify-center bg-gradient-to-br from-emerald-700 to-emerald-800 p-6 text-center sm:p-8">
+          <p className="font-bengali text-2xl font-bold text-white">নতুন শব্দ যোগ করুন</p>
+          <p className="mt-1 text-xs text-emerald-100">Add a new Bengali lexical entry via Quick Input</p>
           <Link
             href="/dashboard/quick-input"
             className="mt-5 rounded-xl bg-white px-6 py-3 text-sm font-bold text-emerald-800 shadow-lg transition hover:bg-emerald-50"
@@ -116,31 +66,31 @@ export function ContributorDashboard({ session }: { session: Session }) {
         </Card>
       </div>
 
-      {/* ③ flagged entries requiring attention */}
-      {flagged.length > 0 ? (
+      {data.attention.length > 0 ? (
         <Card className="ring-2 ring-amber-200">
           <CardHeader
             title="⚠ Entries requiring your attention"
             subtitle="Returned to you with reviewer comments — edit and resubmit, or raise a dispute"
           />
           <ul className="divide-y divide-slate-50">
-            {flagged.map((s) => (
-              <li key={s.id} className="px-5 py-4">
+            {data.attention.map((s) => (
+              <li key={s.id} className="px-4 py-4 sm:px-5">
                 <div className="flex flex-wrap items-center gap-3">
-                  <span className="font-bengali text-lg font-bold text-slate-800">
-                    {s.writtenForm}
-                  </span>
+                  <span className="font-bengali min-w-0 text-lg font-bold text-slate-800">{s.writtenForm}</span>
                   <StateBadge state={s.state} />
+                  <span className="text-[11px] text-slate-400">{timeAgo(s.updatedAt)}</span>
                   <Link
                     href={`/dashboard/submissions/${s.id}`}
-                    className="ml-auto rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-amber-700"
+                    className="w-full rounded-lg bg-amber-600 px-3 py-1.5 text-center text-xs font-bold text-white transition hover:bg-amber-700 sm:ml-auto sm:w-auto"
                   >
-                    Edit & Resubmit →
+                    Edit &amp; Resubmit →
                   </Link>
                 </div>
-                <p className="font-bengali mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-inset ring-amber-100">
-                  💬 {s.state === "C_FLAGGED" ? s.cleComment : s.editorComment}
-                </p>
+                {s.feedback ? (
+                  <p className="font-bengali mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-inset ring-amber-100">
+                    💬 {s.feedback}
+                  </p>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -148,66 +98,34 @@ export function ContributorDashboard({ session }: { session: Session }) {
       ) : null}
 
       <div className="grid gap-6 xl:grid-cols-2">
-        {/* ② recent submissions */}
         <Card>
-          <CardHeader
-            title="My recent submissions"
-            action={
-              <Link href="/dashboard/submissions" className="text-xs font-semibold text-emerald-700 hover:underline">
-                View all →
-              </Link>
-            }
-          />
+          <CardHeader title="My recent submissions" action={<ViewAll href="/dashboard/submissions" />} />
           <SubmissionTable
-            submissions={mine.slice(0, 10)}
+            submissions={data.recent}
+            showContributor={false}
             emptyMessage="You haven't submitted any entries yet — try Quick Input!"
           />
         </Card>
 
         <div className="space-y-6">
-          {/* ④ dispute status */}
           <Card>
             <CardHeader
-              title="Dispute status"
-              subtitle="Cases you escalated to the Arbitration Curator panel"
+              title="Arbitration cases"
+              subtitle="Your disputes and reviewer escalations of your entries"
+              action={data.myCases.length > 0 ? <ViewAll href="/dashboard/arbitration" /> : undefined}
             />
-            <ul className="divide-y divide-slate-50">
-              {myDisputes.length === 0 ? (
-                <li className="px-5 py-5 text-sm italic text-slate-400">
-                  No disputes filed. You may dispute REJECTED, FLAGGED or
-                  C-FLAGGED entries.
-                </li>
-              ) : (
-                myDisputes.map((c) => {
-                  const sub = store.submissions.find((s) => s.id === c.submissionId);
-                  const q = quorumInfo(c);
-                  return (
-                    <li key={c.id} className="px-5 py-3 text-sm">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Link href={`/dashboard/arbitration/${c.id}`} className="font-bengali font-bold text-slate-800 hover:text-emerald-700">
-                          {sub?.writtenForm}
-                        </Link>
-                        <span className="text-xs text-slate-400">{timeAgo(c.openedAt)}</span>
-                        <span className="ml-auto rounded-full bg-purple-50 px-2 py-0.5 text-xs font-semibold text-purple-700 ring-1 ring-inset ring-purple-200">
-                          {c.status === "RESPONSE_WINDOW"
-                            ? "awaiting response window"
-                            : c.status === "RESOLVED"
-                              ? `verdict: ${c.finalVerdict?.replaceAll("_", " ").toLowerCase()}`
-                              : `${q.approve} approve · ${q.reject} reject`}
-                        </span>
-                      </div>
-                    </li>
-                  );
-                })
-              )}
-            </ul>
+            <CaseList
+              cases={data.myCases}
+              now={now}
+              empty="No arbitration cases. You may dispute Rejected, Flagged or C-flagged entries."
+              subtitle={(c) => `${ORIGIN_LABEL[c.origin]} · opened ${timeAgo(c.openedAt)}`}
+            />
           </Card>
 
-          {/* ⑦ contribution timeline */}
           <Card>
             <CardHeader title="My contribution timeline" subtitle="Entries per week, last 8 weeks" />
-            <div className="p-5">
-              <ColumnChart data={series} />
+            <div className="p-4 sm:p-5">
+              <ColumnChart data={data.weekly} />
             </div>
           </Card>
         </div>
@@ -220,173 +138,85 @@ export function ContributorDashboard({ session }: { session: Session }) {
 /* Arbitration Curator dashboard (SRS §7.6.2)                          */
 /* ------------------------------------------------------------------ */
 
-export function CuratorDashboard({ session }: { session: Session }) {
-  const open = store.cases.filter((c) => c.status === "ACTIVE");
-  const inWindow = store.cases.filter((c) => c.status === "RESPONSE_WINDOW");
-  const ties = store.cases.filter((c) => c.status === "TIE_PENDING");
-  const resolved = store.cases.filter((c) => c.status === "RESOLVED");
-  const votedByMe = store.cases.filter((c) =>
-    c.votes.some((v) => v.curatorId === session.userId)
-  );
-  const awaitingMe = open.filter(
-    (c) =>
-      !c.votes.some((v) => v.curatorId === session.userId) &&
-      !c.excludedCuratorIds.includes(session.userId)
-  );
-  const myVotes = store.cases.flatMap((c) =>
-    c.votes.filter((v) => v.curatorId === session.userId)
-  );
-
+export function CuratorDashboard({ data, now }: { session: Session; data: CuratorData; now: number }) {
   return (
     <div className="space-y-6">
-      {/* ① active cases counter */}
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Open for voting" value={open.length} tone="purple" href="/dashboard/arbitration" />
-        <StatCard label="I have voted" value={votedByMe.length} tone="green" />
-        <StatCard label="Awaiting my vote" value={awaitingMe.length} tone="red" href="/dashboard/arbitration" />
+        <StatCard label="Open for voting" value={data.activeCount} tone="purple" href="/dashboard/arbitration?phase=ACTIVE" />
+        <StatCard label="Votes I have cast" value={data.votedCount} tone="green" />
+        <StatCard label="Awaiting my vote" value={data.awaitingCount} tone="red" href="/dashboard/arbitration?phase=ACTIVE" />
       </div>
 
-      {awaitingMe.length > 0 ? (
+      {data.awaitingCount > 0 ? (
         <Link
-          href="/dashboard/arbitration"
+          href="/dashboard/arbitration?phase=ACTIVE"
           className="block rounded-2xl border border-purple-300 bg-purple-50 px-5 py-4 text-sm font-bold text-purple-800 transition hover:bg-purple-100"
         >
-          ⚖ {awaitingMe.length} case{awaitingMe.length === 1 ? "" : "s"} awaiting
-          your vote — open the voting queue →
+          ⚖ {data.awaitingCount} case{data.awaitingCount === 1 ? "" : "s"} awaiting your vote — open the voting queue →
         </Link>
       ) : null}
 
       <div className="grid gap-6 xl:grid-cols-2">
-        {/* ② quorum status panel */}
         <Card>
           <CardHeader
             title="Quorum status"
-            subtitle={`${activeCurators().length} curators registered · 2/3 quorum rule`}
+            subtitle={`${data.panel.eligible} active curator${data.panel.eligible === 1 ? "" : "s"} · two-thirds quorum (${data.panel.quorum} votes)`}
           />
           <ul className="divide-y divide-slate-50">
-            {open.length === 0 ? (
-              <li className="px-5 py-5 text-sm italic text-slate-400">
-                No cases currently open for voting.
-              </li>
-            ) : (
-              open.map((c) => {
-                const sub = store.submissions.find((s) => s.id === c.submissionId);
-                const q = quorumInfo(c);
-                return (
-                  <li key={c.id} className="px-5 py-3.5">
-                    <div className="flex flex-wrap items-center gap-2 text-sm">
-                      <Link href={`/dashboard/arbitration/${c.id}`} className="font-bengali font-bold text-slate-800 hover:text-emerald-700">
-                        {sub?.writtenForm}
-                      </Link>
-                      <span className="ml-auto text-xs tabular-nums text-slate-500">
-                        {q.cast}/{q.eligible} votes cast · {Math.max(q.needed - q.cast, 0)} more for quorum
+            {data.active.length === 0 ? <EmptyRow>No cases are open for voting.</EmptyRow> : null}
+            {data.active.map((c) => {
+              const pct = Math.min(100, (c.votesCast / Math.max(c.quorum, 1)) * 100);
+              const remaining = Math.max(c.quorum - c.votesCast, 0);
+              return (
+                <li key={c.id} className="px-4 py-3.5 sm:px-5">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                    <Link href={`/dashboard/arbitration/${c.id}`} className="font-bengali font-bold text-slate-800 hover:text-emerald-700">
+                      {c.writtenForm}
+                    </Link>
+                    {c.votedByMe ? (
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                        ✓ You voted
                       </span>
-                    </div>
-                    <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-slate-100">
-                      <div className="bg-emerald-500" style={{ width: `${(q.approve / Math.max(q.eligible, 1)) * 100}%` }} />
-                      <div className="bg-rose-400" style={{ width: `${(q.reject / Math.max(q.eligible, 1)) * 100}%` }} />
-                    </div>
-                    <p className="mt-1 text-[11px] text-slate-400">
-                      {q.approve} approve · {q.reject} reject (names hidden)
-                    </p>
-                  </li>
-                );
-              })
-            )}
+                    ) : null}
+                    <span className="ml-auto text-xs tabular-nums text-slate-500">
+                      {c.votesCast}/{c.eligible} cast · {remaining > 0 ? `${remaining} more for quorum` : "quorum reached"}
+                    </span>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
+                    <div className={`h-full rounded-full ${remaining === 0 ? "bg-emerald-500" : "bg-violet-500"}`} style={{ width: `${pct}%` }} />
+                  </div>
+                  {c.votingDeadline ? (
+                    <p className="mt-1 text-[11px] text-slate-400">Voting closes {timeAgo(c.votingDeadline)} · individual verdicts stay hidden until then</p>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         </Card>
 
         <div className="space-y-6">
-          {/* ③ response window */}
           <Card>
-            <CardHeader
-              title="Cases in response window"
-              subtitle="Accused party has 72 hours to counter-claim — not yet votable"
-            />
-            <ul className="divide-y divide-slate-50">
-              {inWindow.length === 0 ? (
-                <li className="px-5 py-4 text-sm italic text-slate-400">None.</li>
-              ) : (
-                inWindow.map((c) => {
-                  const sub = store.submissions.find((s) => s.id === c.submissionId);
-                  return (
-                    <li key={c.id} className="flex items-center gap-3 px-5 py-3 text-sm">
-                      <span className="font-bengali font-bold text-slate-700">{sub?.writtenForm}</span>
-                      <span className="ml-auto text-xs text-slate-400">
-                        window closes {timeAgo(c.responseDeadline)}
-                      </span>
-                    </li>
-                  );
-                })
-              )}
-            </ul>
+            <CardHeader title="Cases in response window" subtitle="The other party has 72 hours to submit a note — not yet open for voting" />
+            <CaseList cases={data.responseWindow} empty="No cases in the response window." now={now} />
           </Card>
 
-          {/* ④ ties + ⑤ my history */}
           <Card>
-            <CardHeader title="Ties pending System Moderator" />
-            <ul className="divide-y divide-slate-50">
-              {ties.length === 0 ? (
-                <li className="px-5 py-4 text-sm italic text-slate-400">No tie votes.</li>
-              ) : (
-                ties.map((c) => {
-                  const sub = store.submissions.find((s) => s.id === c.submissionId);
-                  return (
-                    <li key={c.id} className="px-5 py-3 text-sm">
-                      <span className="font-bengali font-bold">{sub?.writtenForm}</span>{" "}
-                      <span className="text-xs text-slate-400">awaiting tie-break verdict</span>
-                    </li>
-                  );
-                })
-              )}
-            </ul>
-            <CardHeader title="My arbitration history" />
-            <div className="grid grid-cols-2 gap-3 p-5 pt-2">
-              <div className="rounded-xl bg-slate-50 p-4 text-center">
-                <p className="text-2xl font-bold text-emerald-700">
-                  {myVotes.filter((v) => v.verdict !== "REJECT").length}
-                </p>
-                <p className="text-xs text-slate-500">Approve votes</p>
-              </div>
-              <div className="rounded-xl bg-slate-50 p-4 text-center">
-                <p className="text-2xl font-bold text-rose-700">
-                  {myVotes.filter((v) => v.verdict === "REJECT").length}
-                </p>
-                <p className="text-xs text-slate-500">Reject votes</p>
-              </div>
-            </div>
+            <CardHeader title="Tied cases" subtitle="Waiting for the System Moderator to correct and validate" />
+            <CaseList cases={data.ties} empty="No tied cases." now={now} />
+            <CardHeader title="My voting record" />
+            <MiniStats
+              items={[
+                { label: "Sided with contributor", value: data.myVotes.contributor, cls: "text-emerald-700" },
+                { label: "Sided with reviewer", value: data.myVotes.reviewer, cls: "text-sky-700" },
+              ]}
+            />
           </Card>
         </div>
       </div>
 
-      {/* ⑥ recently resolved */}
       <Card>
-        <CardHeader title="Recently resolved" subtitle="Final verdicts with full audit trail" />
-        <ul className="divide-y divide-slate-50">
-          {resolved.length === 0 ? (
-            <li className="px-5 py-5 text-sm italic text-slate-400">
-              No resolved cases yet.
-            </li>
-          ) : (
-            resolved.slice(0, 10).map((c) => {
-              const sub = store.submissions.find((s) => s.id === c.submissionId);
-              return (
-                <li key={c.id} className="flex flex-wrap items-center gap-2 px-5 py-3 text-sm">
-                  <Link href={`/dashboard/arbitration/${c.id}`} className="font-bengali font-bold text-slate-800 hover:text-emerald-700">
-                    {sub?.writtenForm}
-                  </Link>
-                  <span className="text-xs text-slate-400">
-                    {userById(c.claimantId)?.name} vs {userById(c.accusedId)?.name}
-                  </span>
-                  <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                    {c.finalVerdict?.replaceAll("_", " ").toLowerCase()}
-                    {c.verdictBy === "TIE_BREAK" ? " (tie-break)" : ""}
-                  </span>
-                </li>
-              );
-            })
-          )}
-        </ul>
+        <CardHeader title="Recently resolved" subtitle="Final outcomes" action={<ViewAll href="/dashboard/arbitration?phase=RESOLVED" />} />
+        <CaseList cases={data.resolved} empty="No resolved cases yet." now={now} />
       </Card>
     </div>
   );

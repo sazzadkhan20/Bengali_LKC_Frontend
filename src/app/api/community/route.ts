@@ -1,51 +1,36 @@
 import { NextResponse } from "next/server";
-import { getSession, hasPermission } from "@/lib/auth";
-import { recordAudit, store } from "@/lib/store";
+import { backendAuthedFetch } from "@/lib/backend-auth";
 
-/**
- * Author Community Board — post composer (SRS §14.2).
- * Short text-only posts, maximum 500 characters. Restricted entirely to
- * authenticated authors (SRS §14.4).
- */
+const FEED_PARAMS = ["view", "authorId", "page", "size"] as const;
+
+/** Paged feed: ?view=reported (moderators), ?authorId=, ?page=, ?size=. */
+export async function GET(req: Request) {
+  try {
+    const incoming = new URL(req.url).searchParams;
+    const qs = new URLSearchParams();
+    for (const key of FEED_PARAMS) {
+      const value = incoming.get(key);
+      if (value) qs.set(key, value);
+    }
+    const result = await backendAuthedFetch(`/api/community${qs.size ? `?${qs}` : ""}`, { cache: "no-store" });
+    return result.response;
+  } catch (err) {
+    console.error("[community GET]", err);
+    return NextResponse.json({ error: "The community board is unavailable. Try again shortly." }, { status: 503 });
+  }
+}
+
+/** New text post (max 500 characters). */
 export async function POST(req: Request) {
-  const session = await getSession();
-  if (!session || !hasPermission(session.role, "community")) {
-    return NextResponse.json({ error: "Not authorised." }, { status: 403 });
+  try {
+    const body = await req.json().catch(() => ({}));
+    const result = await backendAuthedFetch("/api/community", {
+      method: "POST",
+      body: JSON.stringify({ text: typeof body?.text === "string" ? body.text : "" }),
+    });
+    return result.response;
+  } catch (err) {
+    console.error("[community POST]", err);
+    return NextResponse.json({ error: "The community board is unavailable. Try again shortly." }, { status: 503 });
   }
-  const p = (await req.json().catch(() => ({}))) as { text?: string };
-  const text = (p.text ?? "").trim();
-  if (!text) {
-    return NextResponse.json(
-      { error: "Post text is required." },
-      { status: 422 }
-    );
-  }
-  if (text.length > 500) {
-    return NextResponse.json(
-      { error: "Posts are limited to 500 characters." },
-      { status: 422 }
-    );
-  }
-
-  const post = {
-    id: `post-${store.counters.post++}`,
-    authorId: session.userId,
-    auto: false,
-    text,
-    createdAt: new Date().toISOString(),
-    reactions: [],
-    replies: [],
-    reports: [],
-    hidden: false,
-  };
-  store.posts.push(post);
-  recordAudit({
-    actorId: session.userId,
-    actorRole: session.role,
-    action: "POST_CREATED",
-    targetType: "COMMUNITY",
-    targetId: post.id,
-    detail: text.slice(0, 60),
-  });
-  return NextResponse.json({ ok: true, id: post.id });
 }

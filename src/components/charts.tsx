@@ -153,11 +153,11 @@ export function ColumnChart({
 }) {
   const max = Math.max(...data.map((d) => d.value), 1);
   return (
-    <div className="flex items-end gap-2" style={{ height }}>
+    <div className="flex items-end gap-1 sm:gap-2" style={{ height }}>
       {data.map((d) => (
         <div
           key={d.label}
-          className="group flex h-full flex-1 flex-col items-center justify-end gap-1"
+          className="group flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1"
         >
           <span className="text-[10px] font-semibold tabular-nums text-slate-500 sm:opacity-0 sm:transition sm:group-hover:opacity-100">
             {d.value}
@@ -170,7 +170,9 @@ export function ColumnChart({
             }}
             title={`${d.label}: ${d.value}`}
           />
-          <span className="truncate text-[10px] text-slate-400">{d.label}</span>
+          <span className="max-w-full truncate text-[10px] text-slate-400" title={d.label}>
+            {d.label}
+          </span>
         </div>
       ))}
     </div>

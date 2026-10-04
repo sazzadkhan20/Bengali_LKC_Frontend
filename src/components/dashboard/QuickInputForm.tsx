@@ -32,6 +32,53 @@ interface WordHit {
   origin?: string;
 }
 
+/** CAPTCHA settings from `GET /api/config/captcha`. */
+export interface CaptchaClientConfig {
+  enabled: boolean;
+  provider: "RECAPTCHA_V3" | "CHECKBOX";
+  siteKey: string | null;
+  action: string;
+}
+
+const CHECKBOX_CAPTCHA: CaptchaClientConfig = { enabled: true, provider: "CHECKBOX", siteKey: null, action: "submit_entry" };
+
+interface Grecaptcha {
+  ready(cb: () => void): void;
+  execute(siteKey: string, options: { action: string }): Promise<string>;
+}
+
+function loadRecaptcha(siteKey: string): Promise<Grecaptcha> {
+  const w = window as unknown as { grecaptcha?: Grecaptcha };
+  if (w.grecaptcha) return Promise.resolve(w.grecaptcha);
+  return new Promise((resolve, reject) => {
+    const id = "recaptcha-v3-script";
+    let script = document.getElementById(id) as HTMLScriptElement | null;
+    if (!script) {
+      script = document.createElement("script");
+      script.id = id;
+      script.async = true;
+      script.src = `https://www.google.com/recaptcha/api.js?render=${encodeURIComponent(siteKey)}`;
+      document.head.appendChild(script);
+    }
+    const timer = window.setTimeout(() => reject(new Error("timeout")), 10_000);
+    script.addEventListener("load", () => {
+      window.clearTimeout(timer);
+      if (w.grecaptcha) resolve(w.grecaptcha);
+      else reject(new Error("unavailable"));
+    });
+    script.addEventListener("error", () => {
+      window.clearTimeout(timer);
+      reject(new Error("blocked"));
+    });
+  });
+}
+
+async function recaptchaToken(siteKey: string, action: string): Promise<string> {
+  const g = await loadRecaptcha(siteKey);
+  await new Promise<void>((resolve) => g.ready(resolve));
+  return g.execute(siteKey, { action });
+}
+
 /** randomUUID is only available on HTTPS / localhost; fall back to getRandomValues elsewhere. */
 function newIdempotencyKey(): string {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -380,11 +427,28 @@ interface RelRow {
   label: string;
 }
 
-/** A FLAGGED / C_FLAGGED entry loaded into the form for correction and resubmission. */
+/** The tied arbitration case a System Moderator is resolving by correcting and validating the entry. */
+export interface TieContext {
+  caseId: string;
+  reviewerLabel: string;
+  contributorName: string;
+  reviewerName: string;
+  contributorNote: string | null;
+  reviewerNote: string | null;
+  contributorVotes: number;
+  reviewerVotes: number;
+  votes: { curator: string; verdict: "CONTRIBUTOR" | "REVIEWER"; rationale: string }[];
+}
+
+/**
+ * An existing entry loaded into the form: a FLAGGED / C_FLAGGED entry for correction and resubmission,
+ * or (with {@link TieContext}) an entry in a tied arbitration case for the System Moderator to correct and validate.
+ */
 export interface ResubmissionSource {
   id: string;
   version: number | null;
-  state: "FLAGGED" | "C_FLAGGED";
+  state: "FLAGGED" | "C_FLAGGED" | "ARBITRATION";
+  tie?: TieContext;
   targetState: EntryState;
   feedback: string | null;
   writtenForm: string;
@@ -409,9 +473,11 @@ interface ServerCheck {
 export function QuickInputForm({
   role,
   resubmission,
+  captchaConfig = CHECKBOX_CAPTCHA,
 }: {
   role: Role;
   resubmission?: ResubmissionSource;
+  captchaConfig?: CaptchaClientConfig;
 }) {
   const router = useRouter();
   const [mountedAt] = useState(() => Date.now());
@@ -419,6 +485,7 @@ export function QuickInputForm({
   /** Same key for retries / double-clicks of one entry; renewed only after a successful submit. */
   const idempotencyKeyRef = useRef<string | null>(null);
   const src = resubmission;
+  const tie = src?.tie;
 
   const [word, setWord] = useState(src?.writtenForm ?? "");
   const [pos, setPos] = useState(src?.pos ?? "n");
@@ -433,6 +500,7 @@ export function QuickInputForm({
   const [synsetRels, setSynsetRels] = useState<RelRow[]>(src?.synsetRelations ?? []);
   const [note, setNote] = useState(src?.reviewerNote ?? "");
   const [resubmitted, setResubmitted] = useState<{ id: string; state: EntryState } | null>(null);
+  const [tieResolved, setTieResolved] = useState<{ id: string; changed: string[] } | null>(null);
   const [captcha, setCaptcha] = useState(false);
   const [honeypot, setHoneypot] = useState("");
   /** The near-duplicate warning text the user confirmed; a different warning needs a new confirmation. */
@@ -445,7 +513,7 @@ export function QuickInputForm({
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [pending, setPending] = useState<{
-    kind: "submit" | "draft" | "resubmit";
+    kind: "submit" | "draft" | "resubmit" | "tie";
     entry: Record<string, unknown>;
   } | null>(null);
 
@@ -453,6 +521,24 @@ export function QuickInputForm({
   const isModerator =
     role === "SYSTEM_MODERATOR" || role === "PLATFORM_ARCHITECT";
   const roleName = role === "PLATFORM_ARCHITECT" ? "Platform Architect" : "System Moderator";
+  const needsCaptcha = !isModerator && captchaConfig.enabled;
+  const recaptchaKey =
+    needsCaptcha && captchaConfig.provider === "RECAPTCHA_V3" && captchaConfig.siteKey ? captchaConfig.siteKey : null;
+  const checkboxRequired = needsCaptcha && !recaptchaKey;
+
+  useEffect(() => {
+    // Load early so the token is ready by the time the user submits.
+    if (recaptchaKey) loadRecaptcha(recaptchaKey).catch(() => undefined);
+  }, [recaptchaKey]);
+
+  /** CAPTCHA proof for the request body; throws when reCAPTCHA cannot produce a token. */
+  async function captchaProof(): Promise<Record<string, unknown>> {
+    if (!needsCaptcha) return {};
+    if (recaptchaKey) return { captchaToken: await recaptchaToken(recaptchaKey, captchaConfig.action) };
+    return { captchaPassed: captcha };
+  }
+  const CAPTCHA_LOAD_ERROR =
+    "Verification could not load. Check your connection or allow google.com/recaptcha in your content blocker, then try again.";
   const lockedDefinition =
     synsetAction === "link" && selectedSynset?.definition ? true : false;
   const iliNa = isIliNotAvailable(ili);
@@ -616,14 +702,14 @@ export function QuickInputForm({
     if (serverFailed) {
       list.push({ key: "server", text: "Database check unavailable — retry in a moment." });
     }
-    if (!isModerator && !captcha) {
+    if (checkboxRequired && !captcha) {
       list.push({ key: "captcha", text: "Verification: tick “I'm not a robot”." });
     }
-    if (src && !hasChanges) {
+    if (src && !tie && !hasChanges) {
       list.push({ key: "changes", text: "Edit at least one field to resubmit." });
     }
     return list;
-  }, [allErrors, serverFresh, serverFailed, nearDuplicate, nearConfirmed, isModerator, captcha, src, hasChanges]);
+  }, [allErrors, serverFresh, serverFailed, nearDuplicate, nearConfirmed, checkboxRequired, captcha, src, tie, hasChanges]);
 
   const canSubmit = !busy && !validating && blockers.length === 0;
 
@@ -635,7 +721,7 @@ export function QuickInputForm({
       touch(...TOUCH_GATED);
       return;
     }
-    setPending({ kind: src ? "resubmit" : saveAsDraft ? "draft" : "submit", entry });
+    setPending({ kind: tie ? "tie" : src ? "resubmit" : saveAsDraft ? "draft" : "submit", entry });
   }
 
   async function confirmPending() {
@@ -643,7 +729,9 @@ export function QuickInputForm({
     const { kind, entry: payload } = pending;
     setBusy(true);
     try {
-      if (kind === "resubmit") {
+      if (kind === "tie") {
+        await resolveTie(payload);
+      } else if (kind === "resubmit") {
         await resubmit(payload);
       } else {
         await submit(payload, kind === "draft");
@@ -685,6 +773,14 @@ export function QuickInputForm({
   async function submit(payload: Record<string, unknown>, saveAsDraft: boolean) {
     idempotencyKeyRef.current ??= newIdempotencyKey();
     const sentKey = JSON.stringify(payload);
+    let proof: Record<string, unknown>;
+    try {
+      proof = await captchaProof();
+    } catch {
+      setFormError(CAPTCHA_LOAD_ERROR);
+      setBusy(false);
+      return;
+    }
     try {
       const res = await fetch("/api/submissions", {
         method: "POST",
@@ -697,7 +793,7 @@ export function QuickInputForm({
           ...payload,
           honeypot,
           elapsedSeconds: (Date.now() - mountedAtRef.current) / 1000,
-          captchaPassed: captcha,
+          ...proof,
           confirmNearDuplicate: nearConfirmed,
           saveAsDraft,
         }),
@@ -745,6 +841,14 @@ export function QuickInputForm({
   async function resubmit(payload: Record<string, unknown>) {
     if (!src) return;
     const sentKey = JSON.stringify(payload);
+    let proof: Record<string, unknown>;
+    try {
+      proof = await captchaProof();
+    } catch {
+      setFormError(CAPTCHA_LOAD_ERROR);
+      setBusy(false);
+      return;
+    }
     try {
       const res = await fetch(`/api/submissions/${encodeURIComponent(src.id)}/resubmit`, {
         method: "POST",
@@ -752,7 +856,7 @@ export function QuickInputForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...payload,
-          captchaPassed: captcha,
+          ...proof,
           confirmNearDuplicate: nearConfirmed,
           expectedVersion: src.version ?? undefined,
         }),
@@ -770,6 +874,37 @@ export function QuickInputForm({
     }
   }
 
+  async function resolveTie(payload: Record<string, unknown>) {
+    if (!src || !tie) return;
+    const sentKey = JSON.stringify(payload);
+    try {
+      const res = await fetch(`/api/arbitration/${encodeURIComponent(tie.caseId)}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          action: "resolve_tie",
+          confirmNearDuplicate: nearConfirmed,
+          expectedVersion: src.version ?? undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        applyFailure(res.status, data, "The tie could not be resolved. Please try again.", sentKey);
+        return;
+      }
+      setTieResolved({
+        id: data.submissionId ?? src.id,
+        changed: Array.isArray(data.changed) ? data.changed : [],
+      });
+    } catch {
+      setFormError("Network error — the tie was not resolved. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const cancelPending = useCallback(() => setPending(null), []);
 
   const confirmCopy = ((): {
@@ -779,6 +914,16 @@ export function QuickInputForm({
     toState: EntryState;
   } => {
     const who = word.trim() ? `“${cleanWord(word)}”` : "This entry";
+    if (tie) {
+      return {
+        title: "Resolve the tie and validate?",
+        description: `${who} will be validated ${
+          hasChanges ? "with your corrections" : "exactly as submitted — you have not changed any field"
+        }. Case ${tie.caseId} is closed as resolved by the System Moderator, and the entry is added to the lexicon with permanent IDs.`,
+        confirmLabel: "Yes, validate and resolve",
+        toState: "VALIDATED",
+      };
+    }
     if (isModerator && pending?.kind !== "draft") {
       return {
         title: src ? "Resubmit and validate directly?" : "Submit and validate directly?",
@@ -838,6 +983,42 @@ export function QuickInputForm({
     new Map(senseRels.flatMap((r, j) => (r.target && j !== exceptRow ? [[r.target, j] as const] : [])));
   const usedSynsetTargets = (exceptRow: number) =>
     new Map(synsetRels.flatMap((r, j) => (r.target && j !== exceptRow ? [[r.target, j] as const] : [])));
+
+  if (tieResolved && tie) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-800">
+          <p className="font-bold">✓ Tie resolved — entry {tieResolved.id} is Validated.</p>
+          <p className="mt-1">
+            {tieResolved.changed.length > 0
+              ? `Your corrections (${tieResolved.changed.join(", ")}) were applied.`
+              : "The entry was validated without changes."}{" "}
+            Arbitration case {tie.caseId} is closed and the entry is now part of the lexicon. Its status is final.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-3 text-sm font-semibold">
+          <Link
+            href={`/dashboard/arbitration/${encodeURIComponent(tie.caseId)}`}
+            className="rounded-xl bg-emerald-700 px-5 py-2.5 text-white shadow-sm hover:bg-emerald-800"
+          >
+            View case
+          </Link>
+          <Link
+            href={`/dashboard/submissions/${encodeURIComponent(tieResolved.id)}`}
+            className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-slate-700 hover:bg-slate-50"
+          >
+            View entry
+          </Link>
+          <Link
+            href="/dashboard/arbitration?phase=TIE_PENDING"
+            className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-slate-700 hover:bg-slate-50"
+          >
+            Other tied cases
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   if (resubmitted) {
     return (
@@ -927,7 +1108,75 @@ export function QuickInputForm({
           </dd>
         </dl>
       </ConfirmModal>
-      {src ? (
+      {tie && src ? (
+        <div className="overflow-hidden rounded-xl border border-amber-300 bg-amber-50 text-sm text-amber-950">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <p className="font-semibold">
+              ⚖ Resolving tied case{" "}
+              <Link href={`/dashboard/arbitration/${encodeURIComponent(tie.caseId)}`} className="font-mono underline">
+                {tie.caseId}
+              </Link>{" "}
+              · entry <code className="font-mono">{src.id}</code>
+            </p>
+            <p className="flex items-center gap-2 text-xs font-semibold">
+              <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-emerald-800 ring-1 ring-inset ring-emerald-200">
+                Contributor {tie.contributorVotes}
+              </span>
+              <span className="rounded-full bg-rose-100 px-2.5 py-0.5 text-rose-800 ring-1 ring-inset ring-rose-200">
+                {tie.reviewerLabel} {tie.reviewerVotes}
+              </span>
+            </p>
+          </div>
+          <div className="grid gap-px border-t border-amber-200 bg-amber-200 sm:grid-cols-2">
+            <div className="bg-white px-4 py-3">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-700">
+                Contributor — {tie.contributorName}
+              </p>
+              <p className="font-bengali mt-1 whitespace-pre-wrap text-xs text-slate-700">
+                {tie.contributorNote ?? "No note submitted."}
+              </p>
+            </div>
+            <div className="bg-white px-4 py-3">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-rose-700">
+                {tie.reviewerLabel} — {tie.reviewerName}
+              </p>
+              <p className="font-bengali mt-1 whitespace-pre-wrap text-xs text-slate-700">
+                {tie.reviewerNote ?? "No note submitted."}
+              </p>
+            </div>
+          </div>
+          {tie.votes.length > 0 ? (
+            <details className="border-t border-amber-200 bg-white/60 px-4 py-2.5">
+              <summary className="cursor-pointer text-xs font-semibold text-amber-900">
+                Curator rationales ({tie.votes.length})
+              </summary>
+              <ul className="mt-2 space-y-2">
+                {tie.votes.map((v, i) => (
+                  <li key={`${v.curator}-${i}`} className="rounded-lg bg-white px-3 py-2 text-xs ring-1 ring-inset ring-slate-200">
+                    <p className="font-semibold text-slate-700">
+                      {v.curator} —{" "}
+                      <span className={v.verdict === "CONTRIBUTOR" ? "text-emerald-700" : "text-rose-600"}>
+                        {v.verdict === "CONTRIBUTOR" ? "supports the contributor" : `supports the ${tie.reviewerLabel}`}
+                      </span>
+                    </p>
+                    <p className="font-bengali mt-0.5 whitespace-pre-wrap text-slate-600">{v.rationale}</p>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+          <div className="space-y-1.5 border-t border-amber-200 px-4 py-3 text-xs">
+            <p>
+              Correct any field below, then choose <strong>Validate &amp; resolve tie</strong>. Every field is checked
+              exactly as a new Quick Input entry. The entry moves straight to <strong>Validated</strong>, joins the
+              lexicon and the case closes. If the entry is already correct, you can validate it without changes.
+            </p>
+            <p className="font-semibold text-red-700">
+              🔒 Validation is final — the entry cannot be edited, withdrawn or overridden afterwards.
+            </p>
+          </div>
+        </div>
+      ) : src ? (
         <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
           <p className="font-semibold">
             ↻ Resubmitting entry <code className="font-mono">{src.id}</code> ·{" "}
@@ -948,7 +1197,7 @@ export function QuickInputForm({
           </p>
         </div>
       ) : null}
-      {isModerator ? (
+      {isModerator && !tie ? (
         <div className="rounded-xl border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-900">
           <p className="font-bold">⚡ Your entries are validated directly</p>
           <p className="mt-1 leading-relaxed">
@@ -1604,8 +1853,7 @@ export function QuickInputForm({
         </div>
       ) : null}
 
-      {/* CAPTCHA simulation */}
-      {!isModerator ? (
+      {checkboxRequired ? (
         <label
           className={`flex w-fit cursor-pointer items-center gap-3 rounded-xl border bg-white px-4 py-3 shadow-sm ${
             captcha ? "border-emerald-300" : "border-slate-300"
@@ -1623,10 +1871,19 @@ export function QuickInputForm({
           <span className="text-sm font-medium text-slate-700">
             I&apos;m not a robot
           </span>
-          <span className="ml-2 text-[10px] uppercase tracking-wide text-slate-300">
-            hCaptcha simulation
-          </span>
         </label>
+      ) : recaptchaKey ? (
+        <p className="text-[11px] leading-relaxed text-slate-400">
+          This form is protected by reCAPTCHA. The Google{" "}
+          <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer" className="underline hover:text-slate-600">
+            Privacy Policy
+          </a>{" "}
+          and{" "}
+          <a href="https://policies.google.com/terms" target="_blank" rel="noreferrer" className="underline hover:text-slate-600">
+            Terms of Service
+          </a>{" "}
+          apply.
+        </p>
       ) : null}
 
       <div className="space-y-3 border-t border-slate-100 pt-5">
@@ -1638,7 +1895,9 @@ export function QuickInputForm({
             <p className="font-semibold text-slate-700">
               {blockers.length > 0
                 ? `${
-                    src
+                    tie
+                      ? "Validate & resolve tie"
+                      : src
                       ? isModerator ? "Resubmit & Validate" : "Resubmit"
                       : isModerator ? "Submit & Validate and Save as Draft" : "Submit and Save as Draft"
                   } will be enabled when:`
@@ -1666,13 +1925,33 @@ export function QuickInputForm({
           </div>
         ) : (
           <p className="text-xs font-semibold text-emerald-700">
-            {`✓ All checks passed — ready to ${src ? "resubmit" : "submit"}${
-              isModerator ? " and validate directly" : ""
-            }.`}
+            {tie
+              ? `✓ All checks passed — ready to validate and resolve the tie${
+                  hasChanges ? "" : " (no fields changed)"
+                }.`
+              : `✓ All checks passed — ready to ${src ? "resubmit" : "submit"}${
+                  isModerator ? " and validate directly" : ""
+                }.`}
           </p>
         )}
 
-        {src ? (
+        {tie && src ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              disabled={!canSubmit}
+              className="rounded-xl bg-amber-600 px-7 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-amber-600"
+            >
+              {busy ? "Validating…" : "⚖ Validate & resolve tie"}
+            </button>
+            <Link
+              href={`/dashboard/arbitration/${encodeURIComponent(tie.caseId)}`}
+              className="rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              Cancel
+            </Link>
+          </div>
+        ) : src ? (
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="submit"

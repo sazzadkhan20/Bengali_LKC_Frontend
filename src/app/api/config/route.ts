@@ -1,47 +1,21 @@
 import { NextResponse } from "next/server";
-import { getSession, hasPermission } from "@/lib/auth";
-import { recordAudit, store } from "@/lib/store";
-import type { SystemConfig } from "@/lib/types";
+import { backendAuthedFetch } from "@/lib/backend-auth";
 
-/** System configuration update — Platform Architect only (SRS §7.1.2). */
+/** System configuration — Platform Architect only (enforced by the backend). */
+export async function GET() {
+  try {
+    return (await backendAuthedFetch("/api/config", { cache: "no-store" })).response;
+  } catch {
+    return NextResponse.json({ error: "Configuration service unavailable." }, { status: 503 });
+  }
+}
+
 export async function PUT(req: Request) {
-  const session = await getSession();
-  if (!session || !hasPermission(session.role, "system_config")) {
-    return NextResponse.json({ error: "Not authorised." }, { status: 403 });
+  try {
+    const body = await req.json().catch(() => ({}));
+    const result = await backendAuthedFetch("/api/config", { method: "PUT", body: JSON.stringify(body) });
+    return result.response;
+  } catch {
+    return NextResponse.json({ error: "Configuration service unavailable." }, { status: 503 });
   }
-  const p = (await req.json().catch(() => ({}))) as Partial<SystemConfig>;
-  const numeric: (keyof SystemConfig)[] = [
-    "maxEntriesPerSession",
-    "maxEntriesPerDay",
-    "suspensionThreshold",
-    "minSubmissionSeconds",
-    "anomalyThresholdPerHour",
-    "ipRequestsPerMinute",
-    "sessionTimeoutMinutes",
-    "captchaScoreThreshold",
-    "passwordMinLength",
-    "rewardPointPerEntry",
-    "tierGoldMin",
-    "tierSilverMin",
-    "tierBronzeMin",
-  ];
-  for (const key of numeric) {
-    const v = p[key];
-    if (typeof v === "number" && Number.isFinite(v) && v >= 0) {
-      (store.config[key] as number) = v;
-    }
-  }
-  if (typeof p.captchaEnabled === "boolean")
-    store.config.captchaEnabled = p.captchaEnabled;
-  if (typeof p.honeypotEnabled === "boolean")
-    store.config.honeypotEnabled = p.honeypotEnabled;
-
-  recordAudit({
-    actorId: session.userId,
-    actorRole: session.role,
-    action: "CONFIG_UPDATED",
-    targetType: "CONFIG",
-    detail: JSON.stringify(store.config),
-  });
-  return NextResponse.json({ ok: true, config: store.config });
 }

@@ -33,6 +33,7 @@ function navFor(role: Role): NavItem[] {
         { href: "/dashboard/credentials", labelKey: "navCredentials", icon: "🔑" },
         { href: "/dashboard/queue", labelKey: "navQueue", icon: "🗂" },
         { href: "/dashboard/quick-input", labelKey: "navQuickInput", icon: "✎" },
+        { href: "/dashboard/arbitration", labelKey: "navArbitrationTie", icon: "⚖" },
         ...explore,
         { href: "/dashboard/export", labelKey: "navExport", icon: "⇩" },
         { href: "/dashboard/audit", labelKey: "navAudit", icon: "🛡" },

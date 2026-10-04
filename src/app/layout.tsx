@@ -4,6 +4,7 @@ import { I18nProvider } from "@/lib/i18n";
 import { SessionProvider } from "@/lib/session-context";
 import { getSessionPayload } from "@/lib/auth";
 import "./globals.css";
+import "./layout-guards.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

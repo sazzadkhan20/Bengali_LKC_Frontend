@@ -1,73 +1,152 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { getSession, hasPermission } from "@/lib/auth";
-import { store, userById } from "@/lib/store";
-import { quorumInfo } from "@/lib/queries";
-import { synsetById } from "@/lib/lexicon";
-import { formatDateTime, ROLE_LABEL, timeAgo, nowMs } from "@/lib/format";
+import type { ReactNode } from "react";
+import { getSession } from "@/lib/auth";
+import { backendAuthedFetch } from "@/lib/backend-auth";
+import { nowMs, ROLE_LABEL, STATE_LABEL } from "@/lib/format";
 import {
-  Card,
-  CardHeader,
-  IdChip,
-  PageTitle,
-  PosBadge,
-  StateBadge,
-} from "@/components/ui";
-import {
-  CaseButton,
-  RespondPanel,
-  TieBreakPanel,
-  VotePanel,
-} from "@/components/dashboard/ArbitrationActions";
+  countdown,
+  formatDhaka,
+  ORIGIN_HINT,
+  ORIGIN_LABEL,
+  outcomeLabel,
+  reviewerTitle,
+  STATUS_LABEL,
+  STATUS_STYLE,
+  type CaseDetail,
+} from "@/lib/arbitration";
+import { Card, CardHeader, IdChip, PageTitle, PosBadge, StateBadge } from "@/components/ui";
+import { CuratorVotePanel, PartyNoteForm } from "@/components/dashboard/ArbitrationActions";
 
 export const metadata: Metadata = { title: "Arbitration Case" };
 
-export default async function ArbitrationCasePage({
-  params,
+function Breadcrumb({ id }: { id: string }) {
+  return (
+    <nav className="mb-4 text-xs text-slate-400">
+      <Link href="/dashboard/arbitration" className="hover:text-violet-700">
+        Arbitration
+      </Link>{" "}
+      / <span className="font-mono text-slate-600">{id}</span>
+    </nav>
+  );
+}
+
+function Step({
+  n,
+  title,
+  detail,
+  state,
 }: {
-  params: Promise<{ id: string }>;
+  n: number;
+  title: string;
+  detail: ReactNode;
+  state: "done" | "current" | "upcoming";
 }) {
+  const dot =
+    state === "done"
+      ? "bg-emerald-500 text-white"
+      : state === "current"
+        ? "bg-violet-600 text-white ring-4 ring-violet-100"
+        : "bg-white text-slate-400 ring-1 ring-inset ring-slate-300";
+  return (
+    <li className="flex min-w-0 flex-1 gap-3">
+      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${dot}`}>
+        {state === "done" ? "✓" : n}
+      </span>
+      <span className="min-w-0">
+        <span className={`block text-sm font-bold ${state === "upcoming" ? "text-slate-400" : "text-slate-800"}`}>{title}</span>
+        <span className="block text-xs text-slate-500">{detail}</span>
+      </span>
+    </li>
+  );
+}
+
+function NoteBlock({
+  note,
+  noteAt,
+  tone,
+  pending,
+}: {
+  note: string | null;
+  noteAt: string | null;
+  tone: "emerald" | "rose";
+  pending: ReactNode;
+}) {
+  if (!note) {
+    return <p className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-sm italic text-slate-400">{pending}</p>;
+  }
+  const cls =
+    tone === "emerald" ? "bg-emerald-50 ring-emerald-100" : "bg-rose-50 ring-rose-100";
+  return (
+    <div>
+      <p className={`font-bengali whitespace-pre-wrap rounded-lg px-3 py-2 text-sm text-slate-700 ring-1 ring-inset ${cls}`}>{note}</p>
+      {noteAt ? <p className="mt-1 text-[11px] text-slate-400">Last updated {formatDhaka(noteAt)} (Dhaka)</p> : null}
+    </div>
+  );
+}
+
+export default async function ArbitrationCasePage({ params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
   if (!session) redirect("/login");
   const { id } = await params;
-  const c = store.cases.find((x) => x.id === id);
-  if (!c) notFound();
-  const sub = store.submissions.find((s) => s.id === c.submissionId);
-  if (!sub) notFound();
+  const result = await backendAuthedFetch<CaseDetail>(`/api/arbitration/${encodeURIComponent(id)}`);
+  if (result.status === 401) redirect("/login");
+  if (result.status === 404) notFound();
+  if (result.status === 403) {
+    return (
+      <div className="mx-auto max-w-3xl">
+        <Breadcrumb id={id} />
+        <PageTitle title="Case not available" subtitle={`Arbitration case ${id}`} />
+        <Card>
+          <div className="flex items-start gap-3 p-5 text-sm text-slate-700">
+            <span aria-hidden="true" className="text-lg leading-none">🔒</span>
+            <div className="space-y-3">
+              <p>{(result.data as { error?: string }).error ?? "This arbitration case is not available to you."}</p>
+              <Link href="/dashboard/arbitration" className="inline-block text-xs font-semibold text-violet-700 hover:underline">
+                ← Back to arbitration cases
+              </Link>
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+  if (!result.ok) {
+    throw new Error((result.data as { error?: string }).error ?? "Could not load the arbitration case.");
+  }
 
-  const isCurator = session.role === "ARBITRATION_CURATOR";
-  const isManager = ["PLATFORM_ARCHITECT", "SYSTEM_MODERATOR"].includes(session.role);
-  const isParty =
-    c.claimantId === session.userId || c.accusedId === session.userId;
-  if (!isCurator && !isManager && !isParty) redirect("/dashboard/arbitration");
+  const c = result.data;
+  const now = nowMs();
+  const s = c.submission;
+  const reviewerLabel = reviewerTitle(c.stage);
+  const windowLabel = `the daily check on ${formatDhaka(c.responseWindow.closesAt)} (Dhaka)`;
+  const bothNotes = Boolean(c.contributor.note && c.reviewer?.note);
+  const v = c.voting;
+  const decided = c.status === "RESOLVED" || c.status === "TIE_PENDING";
+  const contributorName = c.contributor.name ?? c.contributor.id;
+  const reviewerName = c.reviewer ? (c.reviewer.name ?? c.reviewer.id) : reviewerLabel;
 
-  const q = quorumInfo(c);
-  const myVote = c.votes.find((v) => v.curatorId === session.userId);
-  const excluded = c.excludedCuratorIds.includes(session.userId);
-  const windowExpired =
-    new Date(c.responseDeadline).getTime() < nowMs() &&
-    c.status === "RESPONSE_WINDOW";
-  const canSeeRationales = isCurator || isManager;
-  const synset = sub.synsetId ? synsetById.get(sub.synsetId) : undefined;
+  const pendingText = (who: "contributor" | "reviewer") =>
+    c.status === "RESPONSE_WINDOW"
+      ? `Waiting for the ${who === "contributor" ? "contributor" : reviewerLabel}'s note — open until ${windowLabel}.`
+      : `No note was submitted within the 72-hour response window.`;
 
   return (
     <div className="mx-auto max-w-6xl">
-      <nav className="mb-4 text-xs text-slate-400">
-        <Link href="/dashboard/arbitration" className="hover:text-emerald-700">
-          Arbitration
-        </Link>{" "}
-        / <span className="font-mono text-slate-600">{c.id}</span>
-      </nav>
+      <Breadcrumb id={c.id} />
       <PageTitle
         title={
           <span className="flex flex-wrap items-center gap-3">
-            <span className="font-bengali">{sub.writtenForm}</span>
-            <PosBadge pos={sub.pos} />
-            <StateBadge state={sub.state} />
+            <span className="font-bengali">{s.writtenForm}</span>
+            <PosBadge pos={s.pos} />
+            <StateBadge state={s.state} />
+            <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${STATUS_STYLE[c.status]}`}>
+              {STATUS_LABEL[c.status]}
+            </span>
           </span>
         }
-        subtitle={`${c.disputeType.replaceAll("_", " ")} · opened ${formatDateTime(c.openedAt)} · ${userById(c.claimantId)?.name} (claimant) vs ${userById(c.accusedId)?.name} (accused)`}
+        subtitle={`${ORIGIN_LABEL[c.origin]} · ${reviewerLabel} stage · opened ${formatDhaka(c.openedAt)} by ${c.openedBy.name ?? c.openedBy.id}${c.openedBy.role ? ` (${ROLE_LABEL[c.openedBy.role]})` : ""}`}
       />
 
       {/* status banner */}
@@ -76,78 +155,177 @@ export default async function ArbitrationCasePage({
           c.status === "RESOLVED"
             ? "border-slate-200 bg-white text-slate-700"
             : c.status === "TIE_PENDING"
-              ? "border-amber-300 bg-amber-50 text-amber-800"
+              ? "border-amber-300 bg-amber-50 text-amber-900"
               : c.status === "ACTIVE"
-                ? "border-purple-300 bg-purple-50 text-purple-800"
-                : "border-sky-300 bg-sky-50 text-sky-800"
+                ? "border-violet-300 bg-violet-50 text-violet-900"
+                : "border-sky-300 bg-sky-50 text-sky-900"
         }`}
       >
-        {c.status === "RESOLVED" ? (
-          <p>
-            <strong>Final verdict:</strong>{" "}
-            {c.finalVerdict?.replaceAll("_", " ").toLowerCase()}{" "}
-            {c.verdictBy === "TIE_BREAK"
-              ? `(tie broken by ${userById(c.tieBrokenBy ?? "")?.name})`
-              : "(panel majority)"}{" "}
-            · resolved {c.resolvedAt ? formatDateTime(c.resolvedAt) : ""}
-            {c.correctionNote
-              ? ` · correction note ${c.correctionApplied ? "applied" : "pending with System Moderator"}`
-              : ""}
-          </p>
-        ) : c.status === "TIE_PENDING" ? (
-          <p>
-            <strong>Draw ({q.approve}–{q.reject}).</strong> Awaiting the System
-            Moderator&apos;s tie-breaking verdict.
-          </p>
-        ) : c.status === "ACTIVE" ? (
-          <p>
-            <strong>Voting open.</strong> {q.cast} of {q.eligible} eligible
-            curators have voted — {Math.max(q.needed - q.cast, 0)} more needed
-            for the 2/3 quorum. Current tally: {q.approve} approve · {q.reject}{" "}
-            reject (identities hidden).
-          </p>
-        ) : (
-          <p>
-            <strong>Response window open.</strong> The accused party may submit
-            a counter-claim until {formatDateTime(c.responseDeadline)} (
-            {timeAgo(c.responseDeadline)}).
-          </p>
-        )}
+        {c.status === "RESPONSE_WINDOW" ? (
+          <div className="space-y-1">
+            <p>
+              <strong>Response window open.</strong> {ORIGIN_HINT[c.origin]} Notes can be submitted or updated until{" "}
+              {windowLabel} ({countdown(c.responseWindow.closesAt, now)}). The 72 hours end{" "}
+              {formatDhaka(c.responseWindow.deadline)}.
+            </p>
+            <p className="text-xs">
+              {bothNotes
+                ? "Both notes are in. Curator voting starts when the window is closed by the daily check."
+                : "Voting has not started. If only one side submits a note, that side's position stands when the window closes."}
+            </p>
+          </div>
+        ) : c.status === "ACTIVE" && v ? (
+          <div className="space-y-1">
+            <p>
+              <strong>Voting open{v.round > 1 ? ` — round ${v.round}` : ""}.</strong> {v.cast} of {v.quorum} required votes
+              cast ({v.eligible} eligible curators). Voting closes at the daily check on{" "}
+              {v.closesAt ? `${formatDhaka(v.closesAt)} (Dhaka)` : "—"}
+              {v.closesAt ? ` · ${countdown(v.closesAt, now)}` : ""}.
+            </p>
+            <p className="text-xs">
+              If fewer than two thirds of the panel have voted by then, voting is extended by another 7 days.
+            </p>
+          </div>
+        ) : c.outcome ? (
+          <div className="space-y-1">
+            <p>
+              <strong>{outcomeLabel(c.status, c.outcome.verdict, c.outcome.verdictBy, c.stage)}.</strong>{" "}
+              {c.outcome.resultingState ? `The entry moved to ${STATE_LABEL[c.outcome.resultingState]}.` : ""}
+              {c.outcome.resolvedAt ? ` Closed ${formatDhaka(c.outcome.resolvedAt)} (Dhaka).` : ""}
+            </p>
+            {c.outcome.note ? <p className="text-xs">{c.outcome.note}</p> : null}
+            {c.status === "TIE_PENDING" ? (
+              <p className="text-xs">
+                The entry stays in arbitration until the System Moderator corrects and validates it.
+              </p>
+            ) : null}
+            {c.outcome.verdictBy === "TIE_BREAK" && c.outcome.resolvedBy ? (
+              <p className="text-xs">
+                Resolved by {c.outcome.resolvedBy.name ?? c.outcome.resolvedBy.id}
+                {c.outcome.resolvedBy.role ? ` (${ROLE_LABEL[c.outcome.resolvedBy.role]})` : ""}.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
-      {/* Side-by-side claim view (SRS §7.6.4) */}
+      {c.viewer.canResolveTie ? (
+        <Card className="mb-6 overflow-hidden border-amber-300 ring-2 ring-amber-200">
+          <div className="flex flex-col gap-4 bg-gradient-to-r from-amber-50 via-white to-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <span
+                aria-hidden="true"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-lg text-amber-700"
+              >
+                ⚖
+              </span>
+              <div className="space-y-1 text-sm">
+                <p className="font-bold text-slate-800">This tie needs your decision</p>
+                <p className="text-slate-600">
+                  Review both notes and the curators&apos; rationales below, then open the entry in Quick Input. Correct
+                  anything that needs fixing and submit. The entry is validated directly, added to the lexicon and this
+                  case is closed.
+                </p>
+              </div>
+            </div>
+            <Link
+              href={`/dashboard/quick-input?tieCase=${encodeURIComponent(c.id)}`}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2"
+            >
+              ✎ Correct &amp; validate
+            </Link>
+          </div>
+        </Card>
+      ) : null}
+
+      {/* phase tracker */}
+      <Card className="mb-6">
+        <ol className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:gap-6">
+          <Step
+            n={1}
+            title="Notes (72 hours)"
+            state={c.status === "RESPONSE_WINDOW" ? "current" : "done"}
+            detail={
+              c.responseWindow.closedAt
+                ? `Closed ${formatDhaka(c.responseWindow.closedAt)}`
+                : `Closes ${formatDhaka(c.responseWindow.closesAt)}`
+            }
+          />
+          <Step
+            n={2}
+            title="Curator vote (7 days)"
+            state={v ? (c.status === "ACTIVE" ? "current" : "done") : decided ? "done" : "upcoming"}
+            detail={
+              v
+                ? c.status === "ACTIVE"
+                  ? `Round ${v.round} · closes ${v.closesAt ? formatDhaka(v.closesAt) : "—"}`
+                  : `${v.cast} votes cast`
+                : decided
+                  ? "Not needed"
+                  : bothNotes
+                    ? "Starts after the window"
+                    : "Needs both notes"
+            }
+          />
+          <Step
+            n={3}
+            title="Decision"
+            state={c.status === "RESOLVED" ? "done" : c.status === "TIE_PENDING" ? "current" : "upcoming"}
+            detail={
+              c.outcome
+                ? outcomeLabel(c.status, c.outcome.verdict, c.outcome.verdictBy, c.stage)
+                : "Applied automatically by the daily check"
+            }
+          />
+        </ol>
+      </Card>
+
+      {c.openingNote ? (
+        <Card className="mb-6 border-l-4 border-l-amber-400">
+          <CardHeader title="Emergency override reason" subtitle={`Recorded by ${c.openedBy.name ?? c.openedBy.id}`} />
+          <p className="font-bengali whitespace-pre-wrap px-5 py-4 text-sm text-slate-700">{c.openingNote}</p>
+        </Card>
+      ) : null}
+
+      {/* side-by-side positions */}
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="border-l-4 border-l-emerald-500">
           <CardHeader
-            title={`Claimant — ${userById(c.claimantId)?.name}`}
-            subtitle={ROLE_LABEL[userById(c.claimantId)?.role ?? "CONTRIBUTOR"]}
+            title={`Contributor — ${contributorName}${c.viewer.side === "CONTRIBUTOR" ? " (you)" : ""}`}
+            subtitle={ROLE_LABEL[c.contributor.role ?? "CONTRIBUTOR"]}
           />
           <div className="space-y-3 p-5 text-sm">
             <p className="flex flex-wrap items-center gap-2">
-              <span className="font-bengali text-xl font-bold">{sub.writtenForm}</span>
-              <PosBadge pos={sub.pos} />
-              {sub.synsetId ? <IdChip id={sub.synsetId} /> : null}
-              {sub.iliCode || synset ? (
+              <span className="font-bengali text-xl font-bold">{s.writtenForm}</span>
+              <PosBadge pos={s.pos} />
+              {s.synsetId ? <IdChip id={s.synsetId} /> : null}
+              {s.ili && s.ili.toLowerCase() !== "n/a" ? (
                 <span className="rounded bg-violet-50 px-1.5 py-0.5 font-mono text-[11px] text-violet-700 ring-1 ring-inset ring-violet-200">
-                  ILI {sub.iliCode ?? synset?.ili}
+                  ILI {s.ili}
                 </span>
               ) : null}
             </p>
-            {sub.definitionText ? (
-              <p className="font-bengali rounded-lg bg-slate-50 px-3 py-2 text-slate-700">
-                {sub.definitionText}
-              </p>
+            {s.definition ? (
+              <p className="font-bengali rounded-lg bg-slate-50 px-3 py-2 text-slate-700">{s.definition}</p>
             ) : null}
             <div>
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-                Dispute note
-              </p>
-              <p className="font-bengali mt-1 rounded-lg bg-emerald-50 px-3 py-2 text-slate-700 ring-1 ring-inset ring-emerald-100">
-                {c.disputeNote}
-              </p>
+              <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-400">Contributor note</p>
+              <NoteBlock note={c.contributor.note} noteAt={c.contributor.noteAt} tone="emerald" pending={pendingText("contributor")} />
             </div>
+            {c.viewer.side === "CONTRIBUTOR" && c.viewer.canEditNote ? (
+              <div className="border-t border-slate-100 pt-3">
+                <PartyNoteForm
+                  caseId={c.id}
+                  side="CONTRIBUTOR"
+                  currentNote={c.contributor.note}
+                  min={c.rules.noteMin}
+                  max={c.rules.noteMax}
+                  closesAtLabel={windowLabel}
+                />
+              </div>
+            ) : null}
             <Link
-              href={`/dashboard/submissions/${sub.id}`}
+              href={`/dashboard/submissions/${encodeURIComponent(s.id)}`}
               className="inline-block text-xs font-semibold text-emerald-700 hover:underline"
             >
               View full submission record →
@@ -157,203 +335,140 @@ export default async function ArbitrationCasePage({
 
         <Card className="border-l-4 border-l-rose-400">
           <CardHeader
-            title={`Accused — ${userById(c.accusedId)?.name}`}
-            subtitle={ROLE_LABEL[userById(c.accusedId)?.role ?? "LEXICAL_EDITOR"]}
+            title={`${reviewerLabel} — ${reviewerName}${c.viewer.side === "REVIEWER" ? " (you)" : ""}`}
+            subtitle={
+              c.stage === "CHIEF"
+                ? "Decision under dispute: final validation stage"
+                : "Decision under dispute: first review stage"
+            }
           />
-          <div className="p-5 text-sm">
-            {c.counterClaim ? (
+          <div className="space-y-3 p-5 text-sm">
+            {c.reviewer ? (
               <>
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-                  Counter-claim
-                </p>
-                <p className="font-bengali mt-1 rounded-lg bg-rose-50 px-3 py-2 text-slate-700 ring-1 ring-inset ring-rose-100">
-                  {c.counterClaim}
-                </p>
+                <div>
+                  <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-400">{reviewerLabel} note</p>
+                  <NoteBlock note={c.reviewer.note} noteAt={c.reviewer.noteAt} tone="rose" pending={pendingText("reviewer")} />
+                </div>
+                {c.viewer.side === "REVIEWER" && c.viewer.canEditNote ? (
+                  <div className="border-t border-slate-100 pt-3">
+                    <PartyNoteForm
+                      caseId={c.id}
+                      side="REVIEWER"
+                      currentNote={c.reviewer.note}
+                      min={c.rules.noteMin}
+                      max={c.rules.noteMax}
+                      closesAtLabel={windowLabel}
+                    />
+                  </div>
+                ) : null}
               </>
-            ) : c.status === "RESPONSE_WINDOW" ? (
-              <p className="italic text-slate-400">
-                Awaiting response — the 72-hour window closes{" "}
-                {timeAgo(c.responseDeadline)}.
-              </p>
             ) : (
-              <p className="italic text-slate-400">
-                No response submitted within the 72-hour window. The absence is
-                noted in the case record.
+              <p className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-sm italic text-slate-400">
+                No {reviewerLabel} decision is on record for this entry, so no reviewer note can be submitted.
               </p>
             )}
-            {c.accusedId === session.userId && c.status === "RESPONSE_WINDOW" ? (
-              <div className="mt-4 border-t border-slate-100 pt-4">
-                <RespondPanel caseId={c.id} />
-              </div>
+            {c.viewer.side && !c.viewer.canEditNote ? (
+              <p className="text-[11px] text-slate-500">
+                The response window is closed; notes are read-only.
+              </p>
             ) : null}
           </div>
         </Card>
       </div>
 
-      {/* Submission & validation history */}
-      <Card className="mt-6">
-        <CardHeader
-          title="Submission & validation history"
-          subtitle="Full chronological timeline of state transitions"
-        />
-        <ol className="thin-scroll flex gap-3 overflow-x-auto px-5 py-4">
-          {sub.history.map((h, i) => (
-            <li
-              key={i}
-              className="min-w-44 shrink-0 rounded-xl border border-slate-100 bg-slate-50/60 p-3"
-            >
-              <p className="text-xs font-bold text-slate-700">
-                {h.from ? `${h.from} →` : "Created as"} {h.to}
+      {/* panel voting — only once the window has closed with both notes */}
+      {v ? (
+        <Card className="mt-6">
+          <CardHeader
+            title={`Curator panel — ${v.cast} of ${v.quorum} required votes`}
+            subtitle={
+              v.closed
+                ? "Voting closed"
+                : `Round ${v.round} · ${v.eligible} eligible curators · individual votes stay hidden until voting closes`
+            }
+          />
+          <div className="space-y-4 p-5">
+            <div>
+              <div className="flex h-2.5 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={v.cast >= v.quorum ? "bg-emerald-500" : "bg-violet-500"}
+                  style={{ width: `${Math.min(100, (v.cast / Math.max(v.quorum, 1)) * 100)}%` }}
+                />
+              </div>
+              <p className="mt-1.5 text-xs text-slate-500">
+                {v.cast >= v.quorum
+                  ? "Quorum reached. The majority decides when voting closes."
+                  : `${v.quorum - v.cast} more vote${v.quorum - v.cast === 1 ? "" : "s"} needed for the two-thirds quorum.`}
+                {v.extensions > 0 ? ` Extended ${v.extensions} time${v.extensions === 1 ? "" : "s"}.` : ""}
               </p>
-              <p className="mt-0.5 text-[10px] text-slate-400">
-                {h.actorId === "system" ? "System" : userById(h.actorId)?.name} ·{" "}
-                {formatDateTime(h.timestamp)}
-              </p>
-              {h.comment ? (
-                <p className="font-bengali mt-1 line-clamp-3 text-[11px] text-slate-500">
-                  {h.comment}
-                </p>
-              ) : null}
-            </li>
-          ))}
-        </ol>
-      </Card>
+            </div>
 
-      {/* Votes */}
-      <Card className="mt-6">
-        <CardHeader
-          title={`Panel votes (${q.cast} cast · quorum ${q.needed} of ${q.eligible})`}
-          subtitle={
-            canSeeRationales
-              ? "Full vote record — visible to curators and moderators only"
-              : "Aggregated tally only — individual curator votes are confidential"
-          }
-        />
-        <div className="p-5">
-          <div className="flex h-3 overflow-hidden rounded-full bg-slate-100">
-            <div
-              className="bg-emerald-500"
-              style={{ width: `${(q.approve / Math.max(q.eligible, 1)) * 100}%` }}
-            />
-            <div
-              className="bg-rose-400"
-              style={{ width: `${(q.reject / Math.max(q.eligible, 1)) * 100}%` }}
-            />
-          </div>
-          <p className="mt-2 text-xs text-slate-500">
-            {q.approve} approve · {q.reject} reject ·{" "}
-            {q.eligible - q.cast} not yet voted
-            {c.excludedCuratorIds.length > 0
-              ? ` · ${c.excludedCuratorIds.length} excluded (conflict of interest)`
-              : ""}
-          </p>
+            {typeof v.contributorVotes === "number" && typeof v.reviewerVotes === "number" ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-emerald-50 px-4 py-3 ring-1 ring-inset ring-emerald-100">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">For the contributor</p>
+                  <p className="text-2xl font-bold tabular-nums text-emerald-800">{v.contributorVotes}</p>
+                </div>
+                <div className="rounded-xl bg-rose-50 px-4 py-3 ring-1 ring-inset ring-rose-100">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-rose-700">For the {reviewerLabel}</p>
+                  <p className="text-2xl font-bold tabular-nums text-rose-800">{v.reviewerVotes}</p>
+                </div>
+              </div>
+            ) : null}
 
-          {canSeeRationales && c.votes.length > 0 ? (
-            <ul className="mt-4 space-y-2">
-              {c.votes.map((v, i) => (
-                <li
-                  key={i}
-                  className="rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3 text-sm"
-                >
-                  <p className="font-semibold text-slate-700">
-                    {userById(v.curatorId)?.name} —{" "}
-                    <span
-                      className={
-                        v.verdict === "REJECT"
-                          ? "text-rose-600"
-                          : "text-emerald-700"
-                      }
-                    >
-                      {v.verdict.replaceAll("_", " ").toLowerCase()}
-                    </span>
-                    <span className="ml-2 text-[10px] font-normal text-slate-400">
-                      {formatDateTime(v.votedAt)}
-                    </span>
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">{v.rationale}</p>
-                  {v.correctionNote ? (
-                    <p className="mt-1 text-xs font-medium text-amber-700">
-                      🩹 Correction note: {v.correctionNote}
+            {v.votes && v.votes.length > 0 ? (
+              <ul className="space-y-2">
+                {v.votes.map((vote) => (
+                  <li key={vote.curator.id} className="rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3 text-sm">
+                    <p className="font-semibold text-slate-700">
+                      {vote.curator.name ?? vote.curator.id} —{" "}
+                      <span className={vote.verdict === "CONTRIBUTOR" ? "text-emerald-700" : "text-rose-600"}>
+                        {vote.verdict === "CONTRIBUTOR" ? "supports the contributor" : `supports the ${reviewerLabel}`}
+                      </span>
+                      <span className="ml-2 text-[10px] font-normal text-slate-400">{formatDhaka(vote.votedAt)}</span>
                     </p>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      </Card>
+                    <p className="font-bengali mt-1 whitespace-pre-wrap text-xs text-slate-600">{vote.rationale}</p>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
 
-      {/* Action panels */}
-      {isCurator && c.status === "ACTIVE" && !myVote && !excluded ? (
-        <Card className="mt-6 ring-2 ring-purple-200">
+            {v.myVote ? (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                <p>
+                  ✓ You voted to{" "}
+                  <strong>{v.myVote.verdict === "CONTRIBUTOR" ? "support the contributor" : `support the ${reviewerLabel}`}</strong>{" "}
+                  on {formatDhaka(v.myVote.votedAt)}.
+                </p>
+                <p className="font-bengali mt-1 whitespace-pre-wrap text-xs text-emerald-800">{v.myVote.rationale}</p>
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
+
+      {c.viewer.isCurator && c.viewer.canVote ? (
+        <Card className="mt-6 ring-2 ring-violet-200">
           <CardHeader
             title="Cast your vote"
-            subtitle="Your vote is binding once quorum and majority are reached"
+            subtitle="Read both notes and the full submission record, then choose a side. Your rationale is mandatory."
           />
           <div className="p-5">
-            <VotePanel caseId={c.id} hasAccusedVersion={!!c.counterClaim} />
+            <CuratorVotePanel
+              caseId={c.id}
+              reviewerLabel={reviewerLabel}
+              contributorName={contributorName}
+              reviewerName={reviewerName}
+              min={c.rules.rationaleMin}
+              max={c.rules.rationaleMax}
+            />
           </div>
         </Card>
       ) : null}
-      {isCurator && excluded ? (
+      {c.viewer.isCurator && !c.viewer.canVote && c.viewer.voteBlockedReason && c.status === "ACTIVE" && !v?.myVote ? (
         <p className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          ⚠ Conflict of interest: you are a party to this case and have been
-          automatically excluded from voting.
+          {c.viewer.voteBlockedReason}
         </p>
-      ) : null}
-      {isCurator && myVote ? (
-        <p className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          ✓ You voted{" "}
-          <strong>{myVote.verdict.replaceAll("_", " ").toLowerCase()}</strong>{" "}
-          on {formatDateTime(myVote.votedAt)}.
-        </p>
-      ) : null}
-
-      {hasPermission(session.role, "tie_breaker") && c.status === "TIE_PENDING" ? (
-        <Card className="mt-6 ring-2 ring-amber-300">
-          <CardHeader
-            title="System Moderator tie-break"
-            subtitle="The panel vote ended in a draw — your verdict is final and binding"
-          />
-          <div className="p-5">
-            <TieBreakPanel caseId={c.id} />
-          </div>
-        </Card>
-      ) : null}
-
-      {isManager && windowExpired ? (
-        <Card className="mt-6">
-          <CardHeader
-            title="Response window expired"
-            subtitle="No counter-claim was submitted — activate the case for panel voting"
-          />
-          <div className="p-5">
-            <CaseButton
-              caseId={c.id}
-              action="activate"
-              label="Activate Case for Voting"
-            />
-          </div>
-        </Card>
-      ) : null}
-
-      {hasPermission(session.role, "apply_corrections") &&
-      c.status === "RESOLVED" &&
-      c.correctionNote &&
-      !c.correctionApplied ? (
-        <Card className="mt-6">
-          <CardHeader
-            title="Apply panel correction"
-            subtitle={`Correction note: ${c.correctionNote}`}
-          />
-          <div className="p-5">
-            <CaseButton
-              caseId={c.id}
-              action="apply_correction"
-              label="🩹 Mark Correction as Applied"
-            />
-          </div>
-        </Card>
       ) : null}
     </div>
   );
