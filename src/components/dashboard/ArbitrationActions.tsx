@@ -1,229 +1,390 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useId, useMemo, useState } from "react";
+import { z } from "zod";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
+import type { CaseSide } from "@/lib/arbitration";
 
-type Verdict = "APPROVE_CLAIMANT" | "APPROVE_ACCUSED" | "REJECT";
+type ApiResult = { ok?: boolean; error?: string; errors?: Record<string, string> };
 
-async function post(
-  caseId: string,
-  body: Record<string, unknown>
-): Promise<string | null> {
-  const res = await fetch(`/api/arbitration/${caseId}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    return data.error ?? "Action failed.";
+async function post(caseId: string, body: Record<string, unknown>): Promise<{ status: number; data: ApiResult }> {
+  try {
+    const res = await fetch(`/api/arbitration/${encodeURIComponent(caseId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, data: (await res.json().catch(() => ({}))) as ApiResult };
+  } catch {
+    return { status: 0, data: { error: "Could not reach the server. Check your connection and try again." } };
   }
-  return null;
 }
 
-/* ---- Curator voting interface (SRS §7.6.4) ------------------------ */
-export function VotePanel({
+function textSchema(label: string, min: number, max: number) {
+  return z
+    .string()
+    .trim()
+    .min(1, `${label} is required.`)
+    .min(min, `${label} must be at least ${min} characters.`)
+    .max(max, `${label} must be at most ${max} characters.`);
+}
+
+function Counter({ length, min, max }: { length: number; min: number; max: number }) {
+  const tone = length > max ? "text-red-600" : length >= min ? "text-emerald-700" : "text-slate-400";
+  return (
+    <span className={`text-[11px] font-semibold tabular-nums ${tone}`}>
+      {length} / {max}
+      {length < min ? ` · ${min - length} more needed` : ""}
+    </span>
+  );
+}
+
+/* ---- Party note: submit or update until the response window is closed ---- */
+export function PartyNoteForm({
   caseId,
-  hasAccusedVersion,
+  side,
+  currentNote,
+  min,
+  max,
+  closesAtLabel,
 }: {
   caseId: string;
-  hasAccusedVersion: boolean;
+  side: CaseSide;
+  currentNote: string | null;
+  min: number;
+  max: number;
+  closesAtLabel: string;
 }) {
   const router = useRouter();
-  const [verdict, setVerdict] = useState<Verdict | null>(null);
-  const [rationale, setRationale] = useState("");
-  const [correction, setCorrection] = useState("");
+  const fieldId = useId();
+  const [editing, setEditing] = useState(currentNote === null);
+  const [note, setNote] = useState(currentNote ?? "");
+  const [touched, setTouched] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const close = useCallback(() => setConfirming(false), []);
+  const label = "Your note";
 
-  async function vote() {
-    if (!verdict) return setError("Select a verdict first.");
-    if (rationale.trim().length < 30)
-      return setError("A rationale of at least 30 characters is mandatory.");
+  const fieldError = useMemo(() => {
+    if (serverError) return serverError;
+    if (!touched && note.length === 0) return null;
+    const check = textSchema(label, min, max).safeParse(note);
+    if (!check.success) return check.error.issues[0]?.message ?? "Invalid note.";
+    if (currentNote !== null && note.trim() === currentNote.trim()) return "Your note is unchanged.";
+    return null;
+  }, [note, touched, min, max, serverError, currentNote]);
+  const valid = textSchema(label, min, max).safeParse(note).success
+    && (currentNote === null || note.trim() !== currentNote.trim());
+
+  async function submit() {
     setBusy(true);
-    const err = await post(caseId, {
-      action: "vote",
-      verdict,
-      rationale: rationale.trim(),
-      correctionNote: correction.trim() || undefined,
-    });
+    setError(null);
+    const { status, data } = await post(caseId, { action: "note", note: note.trim() });
     setBusy(false);
-    if (err) setError(err);
-    else router.refresh();
+    setConfirming(false);
+    if (status === 200) {
+      setSuccess(currentNote === null ? "Your note was submitted." : "Your note was updated.");
+      setEditing(false);
+      setTouched(false);
+      router.refresh();
+      return;
+    }
+    if (data.errors?.note) setServerError(data.errors.note);
+    else setError(data.error ?? "Your note could not be saved. Please try again.");
+    if (status === 409) router.refresh();
   }
 
-  const options: { value: Verdict; label: string; desc: string }[] = [
-    { value: "APPROVE_CLAIMANT", label: "Approve claimant's version", desc: "The disputed entry is accepted as submitted by the claimant." },
-    ...(hasAccusedVersion
-      ? [{ value: "APPROVE_ACCUSED" as Verdict, label: "Approve accused's version", desc: "The counter-claimed version is accepted." }]
-      : []),
+  if (!editing) {
+    return (
+      <div className="space-y-2">
+        {success ? (
+          <p role="status" className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">
+            ✓ {success}
+          </p>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => {
+            setSuccess(null);
+            setNote(currentNote ?? "");
+            setServerError(null);
+            setEditing(true);
+          }}
+          className="rounded-lg px-3 py-1.5 text-xs font-bold text-violet-700 ring-1 ring-inset ring-violet-200 transition hover:bg-violet-50"
+        >
+          ✎ Update my note
+        </button>
+        <p className="text-[11px] text-slate-500">You can update your note until {closesAtLabel}.</p>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault();
+        setTouched(true);
+        if (valid) setConfirming(true);
+      }}
+      className="space-y-2"
+    >
+      <label htmlFor={fieldId} className="block text-xs font-bold text-slate-700">
+        {currentNote === null ? "Submit your note" : "Update your note"}
+        <span className="ml-1 font-normal text-slate-500">
+          — {side === "CONTRIBUTOR" ? "explain why your entry is correct" : "explain why your decision is correct"}
+        </span>
+      </label>
+      <textarea
+        id={fieldId}
+        value={note}
+        rows={5}
+        onChange={(e) => {
+          setNote(e.target.value);
+          setServerError(null);
+          setError(null);
+        }}
+        onBlur={() => setTouched(true)}
+        aria-invalid={Boolean(fieldError)}
+        aria-describedby={`${fieldId}-help`}
+        className={`font-bengali w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 ${
+          fieldError ? "border-red-400 focus:border-red-500 focus:ring-red-200" : "border-slate-300 focus:border-violet-500 focus:ring-violet-200"
+        }`}
+        placeholder={`Between ${min} and ${max} characters`}
+      />
+      <div id={`${fieldId}-help`} className="flex flex-wrap items-center justify-between gap-2">
+        {fieldError ? <span className="text-xs font-medium text-red-600">{fieldError}</span> : <span />}
+        <Counter length={note.trim().length} min={min} max={max} />
+      </div>
+      {error ? (
+        <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700 ring-1 ring-red-200">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="submit"
+          disabled={!valid || busy}
+          className="rounded-xl bg-violet-700 px-4 py-2 text-sm font-bold text-white transition hover:bg-violet-800 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {currentNote === null ? "Submit note" : "Save changes"}
+        </button>
+        {currentNote !== null ? (
+          <button
+            type="button"
+            onClick={() => {
+              setEditing(false);
+              setNote(currentNote);
+              setServerError(null);
+              setError(null);
+            }}
+            className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+        ) : null}
+      </div>
+      <ConfirmModal
+        open={confirming}
+        title={currentNote === null ? "Submit your note?" : "Save your updated note?"}
+        tone="primary"
+        confirmLabel={currentNote === null ? "Submit note" : "Save changes"}
+        busy={busy}
+        onConfirm={submit}
+        onCancel={close}
+        description={
+          <>
+            Curators will read this note when they vote. You can still change it until {closesAtLabel}; after the
+            daily check closes the window it becomes read-only.
+          </>
+        }
+      />
+    </form>
+  );
+}
+
+/* ---- Curator vote: pick a side and give a mandatory rationale ---- */
+export function CuratorVotePanel({
+  caseId,
+  reviewerLabel,
+  contributorName,
+  reviewerName,
+  min,
+  max,
+}: {
+  caseId: string;
+  reviewerLabel: string;
+  contributorName: string;
+  reviewerName: string;
+  min: number;
+  max: number;
+}) {
+  const router = useRouter();
+  const fieldId = useId();
+  const [verdict, setVerdict] = useState<CaseSide | null>(null);
+  const [rationale, setRationale] = useState("");
+  const [touched, setTouched] = useState(false);
+  const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const close = useCallback(() => setConfirming(false), []);
+
+  const schema = useMemo(
+    () =>
+      z.object({
+        verdict: z.enum(["CONTRIBUTOR", "REVIEWER"], { message: "Choose which side you support." }),
+        rationale: textSchema("Rationale", min, max),
+      }),
+    [min, max]
+  );
+  const parsed = schema.safeParse({ verdict: verdict ?? undefined, rationale });
+  const issues = parsed.success
+    ? {}
+    : Object.fromEntries(parsed.error.issues.map((i) => [String(i.path[0]), i.message]));
+  const verdictError = serverErrors.verdict || (touched ? issues.verdict : undefined);
+  const rationaleError =
+    serverErrors.rationale || (touched || rationale.length > 0 ? issues.rationale : undefined);
+
+  async function submit() {
+    if (!parsed.success) return;
+    setBusy(true);
+    setError(null);
+    const { status, data } = await post(caseId, {
+      action: "vote",
+      verdict: parsed.data.verdict,
+      rationale: parsed.data.rationale,
+    });
+    setBusy(false);
+    setConfirming(false);
+    if (status === 200) {
+      router.refresh();
+      return;
+    }
+    if (data.errors) setServerErrors(data.errors);
+    setError(data.error ?? (data.errors ? null : "Your vote could not be recorded. Please try again."));
+    if (status === 409 || status === 403) router.refresh();
+  }
+
+  const options: { value: CaseSide; title: string; desc: string; tone: string }[] = [
+    {
+      value: "CONTRIBUTOR",
+      title: `Support the contributor`,
+      desc: `${contributorName}'s entry should pass this stage.`,
+      tone: "peer-checked:border-emerald-500 peer-checked:bg-emerald-50 peer-checked:ring-emerald-500",
+    },
+    {
+      value: "REVIEWER",
+      title: `Support the ${reviewerLabel}`,
+      desc: `${reviewerName}'s decision should stand.`,
+      tone: "peer-checked:border-rose-500 peer-checked:bg-rose-50 peer-checked:ring-rose-500",
+    },
   ];
 
   return (
-    <div className="space-y-4">
-      {error ? (
-        <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 ring-1 ring-rose-200">
-          {error}
-        </p>
-      ) : null}
-      <div className={`grid gap-3 ${hasAccusedVersion ? "sm:grid-cols-2" : "sm:grid-cols-1"}`}>
-        {options.map((o) => (
-          <button
-            key={o.value}
-            type="button"
-            onClick={() => setVerdict(o.value)}
-            className={`rounded-xl border p-4 text-left transition ${
-              verdict === o.value
-                ? "border-purple-500 bg-purple-50 ring-2 ring-purple-200"
-                : "border-slate-200 bg-white hover:border-purple-300"
-            }`}
-          >
-            <p className="text-sm font-bold text-slate-800">{o.label}</p>
-            <p className="mt-1 text-xs text-slate-500">{o.desc}</p>
-          </button>
-        ))}
-      </div>
-      <textarea
-        value={rationale}
-        onChange={(e) => setRationale(e.target.value)}
-        rows={3}
-        placeholder="Mandatory rationale (minimum 30 characters)…"
-        className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
-      />
-      {verdict ? (
-        <input
-          value={correction}
-          onChange={(e) => setCorrection(e.target.value)}
-          placeholder="Optional correction note — sent to the System Moderator's Pending Corrections queue"
-          className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
+    <form
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault();
+        setTouched(true);
+        if (parsed.success) setConfirming(true);
+      }}
+      className="space-y-4"
+    >
+      <fieldset>
+        <legend className="mb-2 text-xs font-bold text-slate-700">Your verdict</legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {options.map((o) => (
+            <label key={o.value} className="cursor-pointer">
+              <input
+                type="radio"
+                name={`verdict-${caseId}`}
+                value={o.value}
+                checked={verdict === o.value}
+                onChange={() => {
+                  setVerdict(o.value);
+                  setServerErrors((e) => ({ ...e, verdict: "" }));
+                }}
+                className="peer sr-only"
+              />
+              <span
+                className={`block rounded-xl border border-slate-200 px-4 py-3 ring-1 ring-transparent transition hover:border-slate-300 peer-focus-visible:ring-2 peer-focus-visible:ring-violet-400 ${o.tone}`}
+              >
+                <span className="block text-sm font-bold text-slate-800">{o.title}</span>
+                <span className="mt-0.5 block text-xs text-slate-500">{o.desc}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {verdictError ? <p className="mt-1.5 text-xs font-medium text-red-600">{verdictError}</p> : null}
+      </fieldset>
+
+      <div className="space-y-1.5">
+        <label htmlFor={fieldId} className="block text-xs font-bold text-slate-700">
+          Rationale <span className="font-normal text-slate-500">(mandatory, {min}–{max} characters)</span>
+        </label>
+        <textarea
+          id={fieldId}
+          rows={5}
+          value={rationale}
+          onChange={(e) => {
+            setRationale(e.target.value);
+            setServerErrors((er) => ({ ...er, rationale: "" }));
+          }}
+          onBlur={() => setTouched(true)}
+          aria-invalid={Boolean(rationaleError)}
+          placeholder="Explain which arguments convinced you and why."
+          className={`font-bengali w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 ${
+            rationaleError ? "border-red-400 focus:border-red-500 focus:ring-red-200" : "border-slate-300 focus:border-violet-500 focus:ring-violet-200"
+          }`}
         />
-      ) : null}
-      <button
-        onClick={vote}
-        disabled={busy}
-        className="rounded-xl bg-purple-700 px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-purple-800 disabled:opacity-50"
-      >
-        {busy ? "Recording vote…" : "Cast Binding Vote"}
-      </button>
-      <p className="text-[11px] text-slate-400">
-        Your individual vote is never shown to contributors or editors — only
-        the final verdict and aggregated tally.
-      </p>
-    </div>
-  );
-}
-
-/* ---- System Moderator tie-break (SRS §7.6.1) ----------------------- */
-export function TieBreakPanel({ caseId }: { caseId: string }) {
-  const router = useRouter();
-  const [verdict, setVerdict] = useState<Verdict | null>(null);
-  const [rationale, setRationale] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function decide() {
-    if (!verdict) return setError("Select the final verdict.");
-    if (rationale.trim().length < 30)
-      return setError("A tie-break rationale of at least 30 characters is mandatory.");
-    setBusy(true);
-    const err = await post(caseId, {
-      action: "tiebreak",
-      verdict,
-      rationale: rationale.trim(),
-    });
-    setBusy(false);
-    if (err) setError(err);
-    else router.refresh();
-  }
-
-  return (
-    <div className="space-y-3">
-      {error ? (
-        <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 ring-1 ring-rose-200">
-          {error}
-        </p>
-      ) : null}
-      <div className="flex flex-wrap gap-2">
-        {(
-          [
-            ["APPROVE_CLAIMANT", "Approve claimant"],
-            ["APPROVE_ACCUSED", "Approve accused"],
-            ["REJECT", "Reject"],
-          ] as [Verdict, string][]
-        ).map(([v, label]) => (
-          <button
-            key={v}
-            type="button"
-            onClick={() => setVerdict(v)}
-            className={`rounded-xl border px-4 py-2.5 text-sm font-bold transition ${
-              verdict === v
-                ? "border-purple-600 bg-purple-700 text-white"
-                : "border-slate-300 bg-white text-slate-700 hover:border-purple-400"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {rationaleError ? <span className="text-xs font-medium text-red-600">{rationaleError}</span> : <span />}
+          <Counter length={rationale.trim().length} min={min} max={max} />
+        </div>
       </div>
-      <textarea
-        value={rationale}
-        onChange={(e) => setRationale(e.target.value)}
-        rows={2}
-        placeholder="Tie-break rationale (minimum 30 characters)…"
-        className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
-      />
-      <button
-        onClick={decide}
-        disabled={busy}
-        className="rounded-xl bg-purple-700 px-6 py-2.5 text-sm font-bold text-white transition hover:bg-purple-800 disabled:opacity-50"
-      >
-        Cast Tie-Breaking Verdict
-      </button>
-    </div>
-  );
-}
 
-/* ---- Accused counter-claim (SRS §7.3.3) ----------------------------- */
-export function RespondPanel({ caseId }: { caseId: string }) {
-  const router = useRouter();
-  const [text, setText] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function respond() {
-    setBusy(true);
-    const err = await post(caseId, { action: "respond", counterClaim: text });
-    setBusy(false);
-    if (err) setError(err);
-    else router.refresh();
-  }
-
-  return (
-    <div className="space-y-3">
       {error ? (
-        <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 ring-1 ring-rose-200">
+        <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700 ring-1 ring-red-200">
           {error}
         </p>
       ) : null}
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        rows={3}
-        placeholder="Your counter-claim — explain and defend your original decision…"
-        className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
-      />
+
       <button
-        onClick={respond}
-        disabled={busy}
-        className="rounded-xl bg-emerald-700 px-6 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-800 disabled:opacity-50"
+        type="submit"
+        disabled={!parsed.success || busy}
+        className="rounded-xl bg-violet-700 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-violet-800 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        Submit Counter-Claim
+        Cast vote
       </button>
-    </div>
+
+      <ConfirmModal
+        open={confirming}
+        title="Cast your vote?"
+        tone="primary"
+        confirmLabel="Cast vote"
+        busy={busy}
+        onConfirm={submit}
+        onCancel={close}
+        description={
+          <>
+            You are voting to{" "}
+            <strong>
+              {verdict === "CONTRIBUTOR" ? "support the contributor" : `support the ${reviewerLabel}`}
+            </strong>
+            . Votes are final and cannot be changed. Individual votes stay hidden until voting closes.
+          </>
+        }
+      />
+    </form>
   );
 }
 
-/* ---- small one-shot buttons ----------------------------------------- */
+/* ---- Simple case action (System Moderator corrections) ---- */
 export function CaseButton({
   caseId,
   action,
@@ -231,7 +392,7 @@ export function CaseButton({
   className = "rounded-xl bg-slate-800 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-slate-900 disabled:opacity-50",
 }: {
   caseId: string;
-  action: "activate" | "apply_correction";
+  action: "apply_correction";
   label: string;
   className?: string;
 }) {
@@ -240,16 +401,15 @@ export function CaseButton({
   const [error, setError] = useState<string | null>(null);
   return (
     <div>
-      {error ? (
-        <p className="mb-2 text-xs font-medium text-rose-600">{error}</p>
-      ) : null}
+      {error ? <p className="mb-2 text-xs font-medium text-red-600">{error}</p> : null}
       <button
+        type="button"
         disabled={busy}
         onClick={async () => {
           setBusy(true);
-          const err = await post(caseId, { action });
+          const { status, data } = await post(caseId, { action });
           setBusy(false);
-          if (err) setError(err);
+          if (status !== 200) setError(data.error ?? "Action failed.");
           else router.refresh();
         }}
         className={className}

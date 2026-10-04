@@ -1,0 +1,51 @@
+/*
+ * Layout guards: long words, IDs or user text must never push a page wider than the screen.
+ * Kept in the base layer so any Tailwind utility still overrides them.
+ */
+@layer base {
+  /* Browsers give fieldsets min-width: min-content, so a long legend widens the whole form. */
+  fieldset {
+    min-width: 0;
+  }
+  legend {
+    max-width: 100%;
+    white-space: normal;
+  }
+  input,
+  select,
+  textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+  select {
+    text-overflow: ellipsis;
+  }
+  /* Grid tracks default to min-width: auto; long content would overflow the track. */
+  .grid > * {
+    min-width: 0;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  p,
+  li,
+  dd,
+  dt,
+  label,
+  legend,
+  summary,
+  blockquote,
+  figcaption {
+    overflow-wrap: anywhere;
+  }
+  pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  code,
+  kbd,
+  samp {
+    overflow-wrap: anywhere;
+  }
+}

@@ -32,6 +32,15 @@ import {
   type Lifecycle,
 } from "@/components/dashboard/ManagerActionsPanel";
 import type { EntryState, POS, Role, Session, Submission } from "@/lib/types";
+import {
+  ORIGIN_LABEL,
+  outcomeLabel,
+  STATUS_LABEL,
+  type CaseOrigin,
+  type CaseStage,
+  type CaseStatus,
+  type VerdictBy,
+} from "@/lib/arbitration";
 
 export const metadata: Metadata = { title: "Submission" };
 
@@ -75,10 +84,14 @@ type SubmissionDetail = Omit<Submission, "history"> & {
   }[];
   cases: {
     id: string;
-    status: string;
+    status: CaseStatus;
     disputeType: string | null;
     openedAt: string | null;
     finalVerdict: string | null;
+    verdictBy: VerdictBy | null;
+    origin: CaseOrigin | null;
+    stage: CaseStage | null;
+    resultingState: EntryState | null;
   }[];
   reviewers?: { id: string; name: string; role: Role }[];
   /** Present when the caller's role has a server-side review policy. */
@@ -91,9 +104,10 @@ type SubmissionDetail = Omit<Submission, "history"> & {
 };
 
 const CASE_STAGE: Record<string, string> = {
-  RESPONSE_WINDOW: "waiting for the other party's response (72-hour window)",
-  ACTIVE: "under review by the arbitration panel",
-  TIE_PENDING: "awaiting a tie-break decision",
+  RESPONSE_WINDOW:
+    "72-hour response window. You can submit or update your note in the case until the daily check closes the window.",
+  ACTIVE: "The arbitration panel is voting. Notes are read-only; the decision is applied automatically.",
+  TIE_PENDING: "The panel vote is tied. The entry stays in arbitration until the tie is resolved.",
 };
 
 /**
@@ -232,7 +246,7 @@ export default async function SubmissionDetailPage({
   }
   const sub = result.data;
   const nameOf = (userId?: string | null) =>
-    userId ? (sub.users[userId]?.name ?? userId) : "";
+    !userId ? "" : userId === "system" ? "System (arbitration decision)" : (sub.users[userId]?.name ?? userId);
 
   const synset = sub.synset;
   const isFinal = sub.lifecycle?.final ?? (sub.state === "VALIDATED" || sub.state === "REJECTED");
@@ -319,13 +333,10 @@ export default async function SubmissionDetailPage({
               >
                 {activeCase.id}
               </Link>{" "}
-              (active).
+              ({STATUS_LABEL[activeCase.status as CaseStatus]?.toLowerCase() ?? "active"}).
             </p>
             {CASE_STAGE[activeCase.status] ? (
-              <p className="text-xs text-slate-500">
-                Current stage: {CASE_STAGE[activeCase.status]}. No action is needed from you until the
-                panel reaches a verdict.
-              </p>
+              <p className="text-xs text-slate-500">{CASE_STAGE[activeCase.status]}</p>
             ) : null}
           </div>
         </Card>
@@ -356,10 +367,12 @@ export default async function SubmissionDetailPage({
           <Link href={`/dashboard/arbitration/${c.id}`} className="font-bold underline">
             {c.id}
           </Link>{" "}
-          ({c.status.replaceAll("_", " ").toLowerCase()}
-          {c.disputeType ? `, ${c.disputeType.replaceAll("_", " ").toLowerCase()}` : ""}
-          {c.finalVerdict ? `, verdict ${c.finalVerdict.replaceAll("_", " ").toLowerCase()}` : ""}
-          {c.openedAt ? `, opened ${formatDateTime(c.openedAt)}` : ""}).
+          ({c.origin ? ORIGIN_LABEL[c.origin] : (STATUS_LABEL[c.status] ?? c.status)}
+          {c.status === "RESOLVED" || c.status === "TIE_PENDING"
+            ? ` · ${outcomeLabel(c.status, c.finalVerdict, c.verdictBy, c.stage ?? "EDITOR")}`
+            : ` · ${STATUS_LABEL[c.status] ?? c.status}`}
+          {c.resultingState ? ` → ${stateLabel(c.resultingState)}` : ""}
+          {c.openedAt ? ` · opened ${formatDateTime(c.openedAt)}` : ""}).
         </div>
       ))}
 
