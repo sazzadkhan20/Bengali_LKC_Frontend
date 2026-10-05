@@ -22,45 +22,6 @@ export interface SynsetRelation {
   target: string; // ben-syn{integer}
 }
 
-export interface Sense {
-  id: string; // ben-sen{integer}
-  synset: string; // ben-syn{integer}
-  relations?: SenseRelation[];
-}
-
-export interface LexicalEntry {
-  id: string; // ben-word-{pos}{integer}
-  lemma: string;
-  pos: POS;
-  senses: Sense[];
-}
-
-export interface SynsetDefinition {
-  language: "ben" | "eng";
-  text: string;
-}
-
-export interface Synset {
-  id: string; // ben-syn{integer}
-  ili: string; // {offset}-{pos}
-  pos: POS;
-  lexicalized: boolean;
-  definition?: SynsetDefinition;
-  relations?: SynsetRelation[];
-}
-
-export interface LexiconMeta {
-  id: string;
-  label: string;
-  language: string;
-  email: string;
-  license: string;
-  version: string;
-  source: string;
-  description: string;
-  publisher: string;
-}
-
 /* ------------------------------------------------------------------ */
 /* Roles and access control (SRS §3)                                   */
 /* ------------------------------------------------------------------ */
@@ -89,30 +50,6 @@ export interface User {
   dob: string; // ISO date
   institution: string;
   occupation: string;
-}
-
-/**
- * Login credential issued by the Platform Architect (SRS §3.2).
- * The initial password is one-time: it must be changed at first login.
- * In production the password is stored as a salted hash (bcrypt/Argon2id);
- * this demo store keeps it in plain text for demonstration only.
- */
-export interface Credential {
-  id: string;
-  userId: string;
-  username: string;
-  password: string;
-  /** True while the system-generated one-time password is still in force. */
-  oneTime: boolean;
-  issuedBy: string;
-  issuedAt: string;
-  lastChangedAt?: string;
-  deactivated: boolean;
-  /** Pending password-change OTP (2-step validation via registered email). */
-  pendingOtp?: {
-    code: string;
-    expiresAt: string; // ISO timestamp
-  };
 }
 
 export interface Session {
@@ -181,71 +118,8 @@ export interface Submission {
 }
 
 /* ------------------------------------------------------------------ */
-/* Arbitration (SRS §7.6)                                              */
+/* Configuration (SRS §3.2, §4, §5.3)                                  */
 /* ------------------------------------------------------------------ */
-
-export type ArbitrationStatus =
-  | "RESPONSE_WINDOW"
-  | "ACTIVE"
-  | "TIE_PENDING"
-  | "RESOLVED";
-
-export type ArbitrationVerdictOption =
-  | "APPROVE_CLAIMANT"
-  | "APPROVE_ACCUSED"
-  | "REJECT";
-
-export interface ArbitrationVote {
-  curatorId: string;
-  verdict: ArbitrationVerdictOption;
-  rationale: string;
-  correctionNote?: string;
-  votedAt: string;
-}
-
-export interface ArbitrationCase {
-  id: string; // case-{n}
-  submissionId: string;
-  claimantId: string;
-  accusedId: string;
-  disputeType: "DISPUTE_REJECTION" | "DISPUTE_FLAG" | "ESCALATION";
-  disputeNote: string;
-  counterClaim?: string;
-  openedAt: string;
-  responseDeadline: string;
-  status: ArbitrationStatus;
-  votes: ArbitrationVote[];
-  excludedCuratorIds: string[]; // conflict-of-interest rule
-  finalVerdict?: ArbitrationVerdictOption;
-  verdictBy?: "PANEL" | "TIE_BREAK";
-  tieBrokenBy?: string;
-  resolvedAt?: string;
-  correctionApplied?: boolean;
-  correctionNote?: string;
-}
-
-/* ------------------------------------------------------------------ */
-/* Audit + configuration (SRS §3.2, §4, §5.3)                          */
-/* ------------------------------------------------------------------ */
-
-export interface AuditEvent {
-  id: string;
-  timestamp: string;
-  actorId: string;
-  actorRole: Role | "SYSTEM";
-  action: string;
-  targetType:
-    | "SUBMISSION"
-    | "USER"
-    | "CREDENTIAL"
-    | "EXPORT"
-    | "CONFIG"
-    | "ARBITRATION"
-    | "COMMUNITY"
-    | "AUTH";
-  targetId?: string;
-  detail?: string;
-}
 
 export interface SystemConfig {
   maxEntriesPerSession: number;
@@ -284,58 +158,3 @@ export type LeaderboardTier = "GOLD" | "SILVER" | "BRONZE" | "PROVISIONAL";
 /* ------------------------------------------------------------------ */
 
 export type ReactionType = "LIKE" | "UNLIKE" | "CELEBRATE";
-
-export interface PostReaction {
-  userId: string;
-  type: ReactionType;
-}
-
-export interface PostReply {
-  id: string;
-  authorId: string;
-  text: string; // max 200 characters
-  createdAt: string;
-}
-
-export interface PostReport {
-  reporterId: string;
-  reason?: string;
-  reportedAt: string;
-}
-
-export interface CommunityPost {
-  id: string; // post-{n}
-  authorId: string;
-  /** True when the system posted on the author's behalf (milestone / tier). */
-  auto: boolean;
-  text: string; // max 500 characters
-  createdAt: string;
-  reactions: PostReaction[];
-  replies: PostReply[]; // single flat level
-  reports: PostReport[];
-  /** Hidden by a System Moderator after report review (SRS §14.5). */
-  hidden: boolean;
-}
-
-export interface ExportRecord {
-  id: string;
-  timestamp: string;
-  actorId: string;
-  entryCount: number;
-  synsetCount: number;
-  sha256: string;
-  config: string;
-}
-
-/** Interest form from visitors who want to join Ben-LKC (Apply to Contribute). */
-export interface ContributeApplication {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  institution?: string;
-  interestRole?: string;
-  message: string;
-  createdAt: string;
-  status: "NEW" | "REVIEWED";
-}

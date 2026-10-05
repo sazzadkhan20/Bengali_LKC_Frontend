@@ -1,22 +1,29 @@
 import type { Metadata } from "next";
 import { AboutContent } from "@/components/public/AboutContent";
-import { lexiconMeta, lexiconStats } from "@/lib/lexicon";
+import { fetchLexiconStats } from "@/lib/lexicon-api";
 
 export const metadata: Metadata = { title: "About" };
+export const dynamic = "force-dynamic";
 
-export default function AboutPage() {
-  const stats = lexiconStats();
+export default async function AboutPage() {
+  const result = await fetchLexiconStats();
+  const s = result.ok ? result.data : null;
   return (
     <AboutContent
-      stats={{
-        totalEntries: stats.totalEntries,
-        totalSenses: stats.totalSenses,
-        totalSynsets: stats.totalSynsets,
-        polysemousEntries: stats.polysemousEntries,
-      }}
-      lexiconId={lexiconMeta.id}
-      lexiconVersion={lexiconMeta.version}
-      publisher={lexiconMeta.publisher}
+      stats={
+        s
+          ? {
+              totalEntries: s.entries,
+              totalSenses: s.senses,
+              totalSynsets: s.synsets,
+              polysemousEntries: s.polysemousEntries,
+              crowdsourcedEntries: s.crowdsourcedEntries,
+            }
+          : null
+      }
+      lexiconId={s?.lexicon?.id ?? null}
+      lexiconVersion={s?.lexicon?.version ?? null}
+      publisher={s?.lexicon?.publisher ?? null}
     />
   );
 }

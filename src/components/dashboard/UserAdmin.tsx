@@ -159,8 +159,9 @@ export function UsersManager() {
   const [items, setItems] = useState<UserRow[]>([]);
   const [totalPages, setTotalPages] = useState(0);
   const [totalElements, setTotalElements] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
 
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -170,40 +171,41 @@ export function UsersManager() {
     return () => window.clearTimeout(id);
   }, [searchInput]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({
-        page: String(page),
-        size: String(size),
-      });
-      if (q) params.set("q", q);
-      if (role !== "ALL") params.set("role", role);
-      if (status !== "ALL") params.set("status", status);
-      const res = await fetch(`/api/users?${params.toString()}`, {
-        credentials: "include",
-        cache: "no-store",
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? "Could not load users.");
-        setItems([]);
-        return;
-      }
-      setItems(Array.isArray(data.items) ? data.items : []);
-      setTotalPages(Number(data.totalPages) || 0);
-      setTotalElements(Number(data.totalElements) || 0);
-    } catch {
-      setError("Could not load users.");
-    } finally {
-      setLoading(false);
-    }
+  const query = useMemo(() => {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    if (q) params.set("q", q);
+    if (role !== "ALL") params.set("role", role);
+    if (status !== "ALL") params.set("status", status);
+    return params.toString();
   }, [page, size, q, role, status]);
+  const requestKey = `${query}#${reloadTick}`;
+  const loading = loadedKey !== requestKey;
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    const ctrl = new AbortController();
+    fetch(`/api/users?${query}`, { credentials: "include", cache: "no-store", signal: ctrl.signal })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError(data.error ?? "Could not load users.");
+          setItems([]);
+        } else {
+          setError(null);
+          setItems(Array.isArray(data.items) ? data.items : []);
+          setTotalPages(Number(data.totalPages) || 0);
+          setTotalElements(Number(data.totalElements) || 0);
+        }
+        setLoadedKey(requestKey);
+      })
+      .catch(() => {
+        if (ctrl.signal.aborted) return;
+        setError("Could not load users.");
+        setLoadedKey(requestKey);
+      });
+    return () => ctrl.abort();
+  }, [query, requestKey]);
+
+  const load = useCallback(() => setReloadTick((t) => t + 1), []);
 
   const rangeLabel = useMemo(() => {
     if (!totalElements) return "0 users";

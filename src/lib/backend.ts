@@ -1,4 +1,5 @@
 import "server-only";
+import { headers as requestHeaders } from "next/headers";
 
 /**
  * Server-side client for the Bengali LKC Spring Boot API.
@@ -18,12 +19,34 @@ export type BackendResult<T = Record<string, unknown>> = {
   data: T;
 };
 
+/**
+ * The visitor's IP from the incoming request. Anonymous API calls are
+ * rate-limited per IP, and every call reaches the API from this server, so the
+ * original address has to be forwarded explicitly.
+ */
+async function visitorIp(): Promise<string | null> {
+  try {
+    const h = await requestHeaders();
+    return (
+      h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      h.get("x-real-ip")?.trim() ||
+      null
+    );
+  } catch {
+    return null; // outside a request scope
+  }
+}
+
 export async function backendFetch<T = Record<string, unknown>>(
   path: string,
   init: RequestInit & { accessToken?: string | null; refreshToken?: string | null } = {}
 ): Promise<BackendResult<T>> {
   const { accessToken, refreshToken, headers: initHeaders, ...rest } = init;
   const headers = new Headers(initHeaders);
+  if (!headers.has("X-Forwarded-For")) {
+    const ip = await visitorIp();
+    if (ip) headers.set("X-Forwarded-For", ip);
+  }
   if (!headers.has("Content-Type") && rest.body) {
     headers.set("Content-Type", "application/json");
   }

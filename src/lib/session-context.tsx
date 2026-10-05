@@ -66,6 +66,20 @@ function mapFromApi(payload: Record<string, unknown>): AuthSessionData | null {
   };
 }
 
+async function fetchSession(): Promise<AuthSessionData | null> {
+  try {
+    const res = await fetch("/api/auth/session", {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return mapFromApi((await res.json()) as Record<string, unknown>);
+  } catch {
+    return null;
+  }
+}
+
 export function SessionProvider({
   children,
   initial,
@@ -76,36 +90,29 @@ export function SessionProvider({
   const [data, setData] = useState<AuthSessionData | null>(initial ?? null);
   const [loading, setLoading] = useState(!initial);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/auth/session", {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store",
-      });
-      if (!res.ok) {
-        setData(null);
-        return null;
-      }
-      const payload = (await res.json()) as Record<string, unknown>;
-      const mapped = mapFromApi(payload);
-      setData(mapped);
-      return mapped;
-    } catch {
-      setData(null);
-      return null;
-    } finally {
-      setLoading(false);
-    }
+  const apply = useCallback((mapped: AuthSessionData | null) => {
+    setData(mapped);
+    setLoading(false);
+    return mapped;
   }, []);
+
+  const refresh = useCallback(() => {
+    setLoading(true);
+    return fetchSession().then(apply);
+  }, [apply]);
 
   const clear = useCallback(() => setData(null), []);
 
   useEffect(() => {
     // Always reconcile with backend so profile/permissions stay fresh after login.
-    void refresh();
-  }, [refresh]);
+    let cancelled = false;
+    fetchSession().then((mapped) => {
+      if (!cancelled) apply(mapped);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [apply]);
 
   // Proactively refresh access token ~2 minutes before expiry (1-hour sessions).
   useEffect(() => {

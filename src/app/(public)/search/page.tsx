@@ -1,56 +1,33 @@
 import type { Metadata } from "next";
 import { getSession } from "@/lib/auth";
-import { searchByWord, synsetById } from "@/lib/lexicon";
-import {
-  WordSearchView,
-  type WordSearchHit,
-} from "@/components/public/WordSearchView";
-import type { POS } from "@/lib/types";
+import { fetchWordSearch, parsePage, parsePosFilter } from "@/lib/lexicon-api";
+import { WordSearchView } from "@/components/public/WordSearchView";
 
 export const metadata: Metadata = { title: "Word Search" };
+export const dynamic = "force-dynamic";
 
-const ALL_POS: POS[] = ["n", "v", "a", "r"];
+const PER_PAGE = 50;
 
 export default async function WordSearchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; pos?: string }>;
+  searchParams: Promise<{ q?: string; pos?: string; page?: string }>;
 }) {
   const params = await searchParams;
   const session = await getSession();
-  const showIds = session !== null;
   const q = params.q?.trim() ?? "";
-  const posFilter = (params.pos?.split(",").filter((p) =>
-    ALL_POS.includes(p as POS)
-  ) ?? []) as POS[];
+  const posFilter = parsePosFilter(params.pos);
+  const page = parsePage(params.page);
 
-  const raw = q
-    ? searchByWord(q, { pos: posFilter.length ? posFilter : undefined })
-    : [];
-  const exactCount = raw.filter((r) => r.matchType === "exact").length;
-
-  const results: WordSearchHit[] = raw.map(({ entry, matchType }) => {
-    const firstSynset = synsetById.get(entry.senses[0]?.synset);
-    const def = firstSynset?.definition?.text;
-    return {
-      id: entry.id,
-      lemma: entry.lemma,
-      pos: entry.pos,
-      matchType,
-      defPreview: def
-        ? `${def.slice(0, 100)}${def.length > 100 ? "…" : ""}`
-        : null,
-      synsetId: entry.senses[0]?.synset ?? null,
-    };
-  });
+  const result = q ? await fetchWordSearch(q, posFilter, page, PER_PAGE) : null;
 
   return (
     <WordSearchView
       q={q}
       posFilter={posFilter}
-      showIds={showIds}
-      exactCount={exactCount}
-      results={results}
+      showIds={session !== null}
+      result={result?.ok ? result.data : null}
+      error={result && !result.ok ? result.error : null}
     />
   );
 }

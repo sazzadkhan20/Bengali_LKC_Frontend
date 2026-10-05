@@ -37,18 +37,16 @@ Docker image for university-server deployment.
 | **XML export** | Dry-run + configurable LMF export in the exact `Bangla_Mono_Lingual_Lexicons.xml` format, SHA-256 audit logging |
 | **i18n** | English / Bengali UI toggle, Noto Sans Bengali rendering |
 
-The full canonical lexicon (19,270 entries · 22,904 senses · 12,480 synsets ·
-9,884 synset relations) is served from JSON seed data parsed out of
-`Bangla Mono Lingual Lexicons.xml`.
+The dictionary, search pages and home-page statistics read the live lexicon from
+the Spring Boot API (`/api/public/*`): the canonical
+`Bangla Mono Lingual Lexicons.xml` import (19,270 entries · 22,904 senses ·
+12,480 synsets) plus every contribution validated through the review pipeline,
+which appears immediately and is marked "Crowdsourced".
 
 ## Getting started (development)
 
 ```bash
 npm install
-
-# Regenerate seed data if the canonical XML changes
-# (expects the XML one directory above, or pass a path)
-node scripts/build-seed.mjs
 
 # If Turbopack panics with "Next.js package not found", clear the cache first:
 # npm run clean
@@ -99,22 +97,22 @@ mandatory per SRS §12.3.
 
 ## Architecture notes
 
-- `src/lib/lexicon.ts` — in-memory indexes over the canonical lexicon
-  (entry/sense/synset maps, Varnamala buckets, reverse relations, search).
-- `src/lib/store.ts` — **mock workflow database** (users, credentials,
-  submissions, arbitration cases, community posts, audit trail, system
-  config, reward-point derivation). It sits behind a small API surface so it
-  can be swapped for PostgreSQL/Prisma without touching the UI.
-  State resets on server restart by design for the demo.
-- `src/lib/leaderboard.ts` / `src/lib/community.ts` — Leader Board ranking
-  (SRS §7.8) and Community Board view models (SRS §14).
+- All data lives in the Spring Boot API (PostgreSQL). The frontend has no
+  local data store: server components and the `src/app/api/**` BFF routes call
+  it through `src/lib/backend.ts` (public) and `src/lib/backend-auth.ts`
+  (cookie-authenticated, with transparent token refresh).
+- `src/lib/lexicon-api.ts` — typed client for the public lexicon API
+  (browse, word/gloss/synset/sense search, typeahead, word and synset detail,
+  live statistics over the XML baseline plus validated crowdsourced entries).
+- `src/lib/dashboard.ts` / `src/lib/community.ts` / `src/lib/arbitration.ts`
+  — view-model types for the role dashboards, Community Board and arbitration.
 - `src/lib/wordnet21.ts` + `data/wordnet21-ili.json` — Princeton WordNet 2.1
   ILI registry (~118k synsets). Rebuild with `npm run build:wordnet21` after
   extracting the official `WordNet-2.1.tar.gz` into `data/wordnet21-src/`.
-- `src/app/api/**` — REST endpoints for auth (login, change-password,
+- `src/app/api/**` — BFF endpoints for auth (login, change-password,
   forgot-password), submissions, review actions, arbitration, community,
-  lookups (including `/api/lookup/ili`), export, audit download, users,
-  credentials, config.
+  lookups (including `/api/lookup/ili`), lexicon typeahead, contribute
+  applications, export, audit download, users, credentials, config.
 - `src/app/(public)/**` — visitor-facing routes; `src/app/(app)/dashboard/**`
   — authenticated role dashboards. Dynamic routes: `/word/[id]`,
   `/synset/[id]`, `/dashboard/submissions/[id]`, `/dashboard/arbitration/[id]`.
@@ -139,7 +137,8 @@ mandatory per SRS §12.3.
 /dashboard/submissions   My submissions (+ /[id] detail & actions)
 /dashboard/queue         Review queues / queue management
 /dashboard/arbitration   Case list (+ /[id] side-by-side voting view)
-/dashboard/corrections   SM pending corrections
+/dashboard/corrections   SM tie corrections (tied cases queue + correction history)
+/dashboard/applications  PA review of "Apply to contribute" requests (approve → issue account)
 /dashboard/history       LE/CLE decision history
 /dashboard/statistics    Data statistics dashboard
 /dashboard/leaderboard   Leader Board (per-role points, tiers, ranks)

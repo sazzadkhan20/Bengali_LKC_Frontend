@@ -11,7 +11,7 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 
@@ -255,6 +255,14 @@ export const STRINGS = {
     en: "Submit another request",
     bn: "আরেকটি আবেদন পাঠান",
   },
+  contributeFixFields: {
+    en: "Please correct the highlighted fields and submit again.",
+    bn: "চিহ্নিত ঘরগুলো ঠিক করে আবার জমা দিন।",
+  },
+  contributeFailed: {
+    en: "We could not send your request. Check your connection and try again.",
+    bn: "আপনার আবেদন পাঠানো যায়নি। সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।",
+  },
 
   /* About */
   aboutTitle: { en: "About the Bengali LKC", bn: "বাংলা এলকেসি সম্পর্কে" },
@@ -312,6 +320,7 @@ export const STRINGS = {
   navStatistics: { en: "Data Statistics", bn: "তথ্য পরিসংখ্যান" },
   navUsers: { en: "User Management", bn: "ব্যবহারকারী ব্যবস্থাপনা" },
   navCredentials: { en: "Credential Management", bn: "শংসাপত্র ব্যবস্থাপনা" },
+  navApplications: { en: "Applications", bn: "আবেদনসমূহ" },
   navQueue: { en: "Queue Management", bn: "সারি ব্যবস্থাপনা" },
   navQuickInput: { en: "Data Entry (Quick Input)", bn: "তথ্য এন্ট্রি (Quick Input)" },
   navQuickInputMod: {
@@ -330,7 +339,7 @@ export const STRINGS = {
     en: "Arbitration Oversight",
     bn: "সালিশ তত্ত্বাবধান",
   },
-  navCorrections: { en: "Pending Corrections", bn: "মুলতুবি সংশোধন" },
+  navCorrections: { en: "Tie Corrections", bn: "টাই সংশোধন" },
   navSubmissions: { en: "My Submissions", bn: "আমার জমা" },
   navDisputes: { en: "My Disputes", bn: "আমার বিরোধ" },
   navReviewQueue: { en: "Review Queue", bn: "পর্যালোচনা সারি" },
@@ -484,13 +493,13 @@ export const STRINGS = {
   of: { en: "of", bn: "এর" },
   filterByPos: { en: "Filter by POS", bn: "পদ অনুযায়ী বাছাই" },
   searchHint: {
-    en: "Type a Bengali word above — exact matches are listed first, then prefix matches.",
-    bn: "উপরে একটি বাংলা শব্দ লিখুন — সম্পূর্ণ মিল আগে, তারপর আংশিক মিল।",
+    en: "Type a Bengali word above — exact matches are listed first, then words that start with it, then words that contain it.",
+    bn: "উপরে একটি বাংলা শব্দ লিখুন — সম্পূর্ণ মিল আগে, তারপর যে শব্দ এটি দিয়ে শুরু, তারপর যে শব্দে এটি আছে।",
   },
   noResultsFor: { en: "No results for", bn: "কোনো ফলাফল নেই" },
   noResultsHint: {
-    en: "Try a shorter prefix, or search by definition in the Gloss tab.",
-    bn: "ছোট উপসর্গ চেষ্টা করুন, অথবা Gloss ট্যাবে সংজ্ঞা দিয়ে খুঁজুন।",
+    en: "Check the spelling, try fewer characters, or search by meaning in the Gloss tab.",
+    bn: "বানান যাচাই করুন, কম অক্ষর দিয়ে চেষ্টা করুন, অথবা Gloss ট্যাবে অর্থ দিয়ে খুঁজুন।",
   },
   results: { en: "results", bn: "ফলাফল" },
   result: { en: "result", bn: "ফলাফল" },
@@ -608,16 +617,16 @@ export const STRINGS = {
 
   /* Extra search chrome */
   glossHint: {
-    en: "Searches definition texts in Bengali and English (exact substring match). Example: পাখি or bird.",
-    bn: "বাংলা ও ইংরেজি সংজ্ঞা টেক্সটে অনুসন্ধান (সম্পূর্ণ সাবস্ট্রিং মিল)। উদাহরণ: পাখি বা bird।",
+    en: "Searches definition texts in Bengali and English (case-insensitive phrase match). Example: পাখি or bird.",
+    bn: "বাংলা ও ইংরেজি সংজ্ঞা টেক্সটে অনুসন্ধান (বড়/ছোট হাতের অক্ষর নির্বিশেষে বাক্যাংশ মিল)। উদাহরণ: পাখি বা bird।",
   },
   noDefsContain: {
     en: "No definitions contain",
     bn: "কোনো সংজ্ঞায় নেই",
   },
   glossEmptyHint: {
-    en: "Gloss search currently uses exact matching; LLM-assisted semantic matching is a planned enhancement.",
-    bn: "Gloss অনুসন্ধান এখন exact matching ব্যবহার করে; LLM-সহায়ক semantic matching পরিকল্পিত উন্নতি।",
+    en: "Try a shorter or different keyword, or look the word up directly in the Word tab.",
+    bn: "ছোট বা ভিন্ন কোনো শব্দ দিয়ে চেষ্টা করুন, অথবা Word ট্যাবে সরাসরি শব্দটি খুঁজুন।",
   },
   wordsLabel: { en: "Words", bn: "শব্দ" },
   lexicalGap: {
@@ -651,6 +660,40 @@ export const STRINGS = {
     en: "This sense has no recorded sense-level relations.",
     bn: "এই sense-এর কোনো sense-স্তরের সম্পর্ক নেই।",
   },
+
+  /* Live lexicon */
+  containsMatch: { en: "Contains", bn: "অন্তর্ভুক্ত মিল" },
+  contains: { en: "contains", bn: "অন্তর্ভুক্ত" },
+  crowdsourced: { en: "Crowdsourced", bn: "জনঅবদান" },
+  crowdsourcedTitle: {
+    en: "Contributed through the platform and validated by the editorial pipeline",
+    bn: "প্ল্যাটফর্মে অবদানকৃত এবং সম্পাদকীয় প্রক্রিয়ায় যাচাইকৃত",
+  },
+  validatedOn: { en: "Validated", bn: "যাচাই" },
+  newConcept: { en: "New concept", bn: "নতুন ধারণা" },
+  lexiconUnavailable: {
+    en: "The lexicon service is temporarily unavailable.",
+    bn: "অভিধান সেবা সাময়িকভাবে অনুপলব্ধ।",
+  },
+  lexiconUnavailableHint: {
+    en: "Please refresh the page in a moment. If the problem persists, contact the platform administrator.",
+    bn: "কিছুক্ষণ পর পৃষ্ঠাটি রিফ্রেশ করুন। সমস্যা থাকলে প্ল্যাটফর্ম প্রশাসকের সাথে যোগাযোগ করুন।",
+  },
+  glossTooShort: {
+    en: "Type at least 2 characters to search definitions.",
+    bn: "সংজ্ঞা খুঁজতে কমপক্ষে ২টি অক্ষর লিখুন।",
+  },
+  showingRange: {
+    en: "Showing {from}–{to} of {total}",
+    bn: "{total}টির মধ্যে {from}–{to} দেখানো হচ্ছে",
+  },
+  seeAllResults: { en: "See all results for", bn: "সব ফলাফল দেখুন" },
+  noSuggestions: { en: "No matching words", bn: "মিল পাওয়া শব্দ নেই" },
+  suggestionsLabel: { en: "Word suggestions", bn: "শব্দ প্রস্তাবনা" },
+  searching: { en: "Searching…", bn: "খোঁজা হচ্ছে…" },
+  synonymsMore: { en: "+{n} more", bn: "+আরও {n}টি" },
+  wordsInSynset: { en: "Bengali words in this synset", bn: "এই synset-এর বাংলা শব্দ" },
+  allPos: { en: "All", bn: "সব" },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;
@@ -679,19 +722,27 @@ function applyDocumentLang(lang: UiLanguage) {
   document.body.classList.toggle("lang-bn", lang === "bn");
 }
 
+const LANG_EVENT = "lkc-lang-change";
+
+function subscribeLang(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(LANG_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(LANG_EVENT, onChange);
+  };
+}
+
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [lang, setLangState] = useState<UiLanguage>("en");
+  const lang = useSyncExternalStore<UiLanguage>(subscribeLang, readSavedLang, () => "en");
 
   useEffect(() => {
-    const saved = readSavedLang();
-    setLangState(saved);
-    applyDocumentLang(saved);
-  }, []);
+    applyDocumentLang(lang);
+  }, [lang]);
 
   const setLang = useCallback((l: UiLanguage) => {
-    setLangState(l);
     window.localStorage.setItem("lkc-lang", l);
-    applyDocumentLang(l);
+    window.dispatchEvent(new Event(LANG_EVENT));
   }, []);
 
   const t = useCallback(

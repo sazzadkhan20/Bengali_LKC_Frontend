@@ -47,6 +47,39 @@ export type DashCase = {
   votedByMe?: boolean;
 };
 
+export type TieCorrectionChange = { field: string; before: string | null; after: string | null };
+
+/** A tied arbitration case the System Moderator closed by correcting and validating the entry. */
+export type TieCorrectionRecord = {
+  caseId: string;
+  submissionId: string;
+  word: string;
+  pos: POS | null;
+  state: EntryState;
+  entryId: string | null;
+  resolvedAt: string | null;
+  moderatorId: string | null;
+  moderatorName: string | null;
+  changes: TieCorrectionChange[];
+  note: string | null;
+};
+
+/** A tied arbitration case waiting for the System Moderator's corrected entry. */
+export type TieQueueItem = {
+  caseId: string;
+  submissionId: string;
+  word: string;
+  pos: POS | null;
+  definition: string | null;
+  stage: string;
+  openedAt: string | null;
+  votingClosedAt: string | null;
+  tally: string | null;
+  votes: number;
+  contributorName: string | null;
+  reviewerName: string | null;
+};
+
 export type ActivityEvent = {
   id: string;
   at: string;
@@ -116,6 +149,7 @@ export type ArchitectData = {
   stuckUnderReview: number;
   lexicon: { entries: number; crowdsourcedEntries: number; synsets: number; senses: number };
   lastExport: { id: string; at: string; entryCount: number; actorName: string | null } | null;
+  newApplications: number;
   topContributors: { userId: string; name: string; submitted: number; validated: number }[];
   recentActivity: ActivityEvent[];
 };
@@ -125,7 +159,7 @@ export type ModeratorData = {
   underReviewOld: number;
   openCases: DashCase[];
   ties: DashCase[];
-  pendingCorrections: DashCase[];
+  recentCorrections: TieCorrectionRecord[];
   weekly: ChartDatum[];
   recentActivity: ActivityEvent[];
   anomalyThresholdPerHour: number;

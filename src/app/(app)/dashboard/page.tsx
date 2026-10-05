@@ -25,7 +25,9 @@ export default async function DashboardPage() {
   if (!session) redirect("/login");
   const [payload, data] = await Promise.all([getSessionPayload(), fetchDashboard<unknown>()]);
   const displayName = payload?.profile.name ?? session.name;
-  const now = Date.now();
+  // Relative times are measured from the moment the API built the dashboard.
+  const generatedAt = (data as { generatedAt?: unknown } | null)?.generatedAt;
+  const now = typeof generatedAt === "string" ? Date.parse(generatedAt) || 0 : 0;
 
   const body = (() => {
     if (!data) return <DashboardUnavailable />;

@@ -1,19 +1,17 @@
 import { HomeHero } from "@/components/public/HomeHero";
 import { HomeBody } from "@/components/public/HomeBody";
-import { lexiconStats } from "@/lib/lexicon";
+import { fetchLexiconStats } from "@/lib/lexicon-api";
 
-export default function HomePage() {
-  const stats = lexiconStats();
+export const dynamic = "force-dynamic";
+
+export default async function HomePage() {
+  const stats = await fetchLexiconStats();
+  const s = stats.ok ? stats.data : null;
   const counters = [
-    { key: "entries", value: stats.totalEntries },
-    { key: "senses", value: stats.totalSenses },
-    { key: "synsets", value: stats.totalSynsets },
-    {
-      key: "relations",
-      value:
-        Object.values(stats.synsetRelationCounts).reduce((a, b) => a + b, 0) +
-        Object.values(stats.senseRelationCounts).reduce((a, b) => a + b, 0),
-    },
+    { key: "entries", value: s?.entries ?? null },
+    { key: "senses", value: s?.senses ?? null },
+    { key: "synsets", value: s?.synsets ?? null },
+    { key: "relations", value: s?.relations ?? null },
   ];
 
   return (

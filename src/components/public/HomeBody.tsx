@@ -15,7 +15,7 @@ const PIPE_KEYS = [
 export function HomeBody({
   counters,
 }: {
-  counters: { key: string; value: number }[];
+  counters: { key: string; value: number | null }[];
 }) {
   const { t, lang } = useI18n();
   const counterLabels: Record<string, string> = {
@@ -32,7 +32,13 @@ export function HomeBody({
           {counters.map((c) => (
             <div key={c.key} className="px-3 py-6 text-center sm:px-6 sm:py-8">
               <p className="text-[clamp(1.35rem,4.5vw,2.25rem)] font-extrabold tabular-nums text-emerald-800">
-                {formatNumber(c.value)}
+                {c.value === null ? (
+                  <span className="text-slate-300" title={t("lexiconUnavailable")}>
+                    —
+                  </span>
+                ) : (
+                  formatNumber(c.value)
+                )}
               </p>
               <p className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">
                 {counterLabels[c.key] ?? c.key}

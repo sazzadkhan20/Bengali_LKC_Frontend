@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
@@ -70,7 +71,7 @@ function IssuedBanner({ issued }: { issued: IssuedCredential }) {
 
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
-  return <p className="mt-1 text-xs font-medium text-rose-600">{message}</p>;
+  return <p className="mt-1 text-xs font-medium text-red-600">{message}</p>;
 }
 
 const createUserSchema = z.object({
@@ -171,16 +172,55 @@ function validateCreateForm(
   return { data: parsed.data, errors: {} };
 }
 
-export function CreateUserForm({ onCreated }: { onCreated: () => void }) {
-  const [form, setForm] = useState<CreateForm>({
-    name: "",
-    username: "",
-    email: "",
-    role: "CONTRIBUTOR",
-    dob: "",
-    institution: "",
-    occupation: "",
-  });
+/** A contribute application the new account is being issued for. */
+export type ApplicationPrefill = {
+  id: string;
+  name: string;
+  email: string;
+  institution: string | null;
+  interestRole: string | null;
+};
+
+const EMPTY_FORM: CreateForm = {
+  name: "",
+  username: "",
+  email: "",
+  role: "CONTRIBUTOR",
+  dob: "",
+  institution: "",
+  occupation: "",
+};
+
+const ISSUABLE_ROLES = new Set<string>(ROLE_OPTIONS.map((r) => r.value));
+
+function suggestUsername(email: string): string {
+  const local = email.split("@")[0]?.toLowerCase() ?? "";
+  const cleaned = local.replace(/[^a-z0-9._-]/g, "").slice(0, 30);
+  return cleaned.length >= 3 ? cleaned : "";
+}
+
+function formFromApplication(app: ApplicationPrefill | null | undefined): CreateForm {
+  if (!app) return EMPTY_FORM;
+  return {
+    ...EMPTY_FORM,
+    name: app.name,
+    email: app.email,
+    username: suggestUsername(app.email),
+    institution: app.institution ?? "",
+    role: app.interestRole && ISSUABLE_ROLES.has(app.interestRole) ? (app.interestRole as Role) : "CONTRIBUTOR",
+  };
+}
+
+export function CreateUserForm({
+  onCreated,
+  application,
+}: {
+  onCreated: () => void;
+  application?: ApplicationPrefill | null;
+}) {
+  const [linkedApp, setLinkedApp] = useState<ApplicationPrefill | null>(application ?? null);
+  const [approvedApp, setApprovedApp] = useState<ApplicationPrefill | null>(null);
+  const [form, setForm] = useState<CreateForm>(() => formFromApplication(application));
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [touched, setTouched] = useState<Partial<Record<keyof CreateForm, boolean>>>({});
   const [identifiers, setIdentifiers] = useState<{ usernames: string[]; emails: string[] }>({
@@ -198,17 +238,26 @@ export function CreateUserForm({ onCreated }: { onCreated: () => void }) {
       const res = await fetch("/api/users/identifiers", { credentials: "include" });
       if (!res.ok || cancelled) return;
       const data = await res.json();
-      if (!cancelled) {
-        setIdentifiers({
-          usernames: Array.isArray(data.usernames) ? data.usernames : [],
-          emails: Array.isArray(data.emails) ? data.emails : [],
+      if (cancelled) return;
+      const next = {
+        usernames: Array.isArray(data.usernames) ? data.usernames : [],
+        emails: Array.isArray(data.emails) ? data.emails : [],
+      };
+      setIdentifiers(next);
+      if (application) {
+        // Surface conflicts in the prefilled values (e.g. the applicant already has an account).
+        const prefilled = formFromApplication(application);
+        const { errors } = validateCreateForm(prefilled, next, {
+          requireComplete: false,
+          keys: ["name", "username", "email"],
         });
+        setFieldErrors(errors);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [application]);
 
   function revalidate(nextForm: CreateForm, nextTouched = touched) {
     const activeKeys = (Object.keys(nextTouched) as (keyof CreateForm)[]).filter(
@@ -275,35 +324,39 @@ export function CreateUserForm({ onCreated }: { onCreated: () => void }) {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify(linkedApp ? { ...data, applicationId: linkedApp.id } : data),
       });
-      const body = await res.json();
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(body.error ?? "Could not create the account. Please try again.");
         setConfirmOpen(false);
         return;
       }
       setIssued(body.credential);
+      setApprovedApp(linkedApp);
+      setLinkedApp(null);
       setIdentifiers((prev) => ({
         usernames: [...prev.usernames, data.username],
         emails: [...prev.emails, data.email],
       }));
-      setForm({
-        name: "",
-        username: "",
-        email: "",
-        role: "CONTRIBUTOR",
-        dob: "",
-        institution: "",
-        occupation: "",
-      });
+      setForm(EMPTY_FORM);
       setTouched({});
       setFieldErrors({});
       setConfirmOpen(false);
       onCreated();
+    } catch {
+      setError("Could not reach the server. Please try again.");
+      setConfirmOpen(false);
     } finally {
       setBusy(false);
     }
+  }
+
+  function unlinkApplication() {
+    setLinkedApp(null);
+    setForm(EMPTY_FORM);
+    setTouched({});
+    setFieldErrors({});
   }
 
   const field =
@@ -312,8 +365,43 @@ export function CreateUserForm({ onCreated }: { onCreated: () => void }) {
   return (
     <div className="space-y-4">
       {issued ? <IssuedBanner issued={issued} /> : null}
+      {issued && approvedApp ? (
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800 ring-1 ring-emerald-200">
+          <span>
+            Application <span className="font-mono font-semibold">{approvedApp.id}</span> from {approvedApp.name} is
+            now marked approved and linked to this account.
+          </span>
+          <Link href="/dashboard/applications" className="font-semibold underline hover:text-emerald-900">
+            Back to applications
+          </Link>
+        </p>
+      ) : null}
+      {linkedApp ? (
+        <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm">
+          <div className="min-w-0">
+            <p className="font-semibold text-sky-900">
+              Issuing an account for application <span className="font-mono">{linkedApp.id}</span>
+            </p>
+            <p className="mt-0.5 text-xs text-sky-800">
+              Name, email, institution and role are prefilled from the request
+              {linkedApp.interestRole && !ISSUABLE_ROLES.has(linkedApp.interestRole)
+                ? " (the applicant chose “Other”, so the role defaults to Lexical Contributor)"
+                : ""}
+              . Review them, add the date of birth and occupation, then create the account. The application is
+              approved automatically.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={unlinkApplication}
+            className="shrink-0 rounded-lg border border-sky-300 bg-white px-3 py-1.5 text-xs font-semibold text-sky-800 transition hover:bg-sky-100"
+          >
+            Clear & create unlinked
+          </button>
+        </div>
+      ) : null}
       {error ? (
-        <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 ring-1 ring-rose-200">
+        <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700 ring-1 ring-red-200">
           {error}
         </p>
       ) : null}
@@ -435,7 +523,7 @@ export function CreateUserForm({ onCreated }: { onCreated: () => void }) {
             user must change it after their first sign-in.
           </>
         }
-        confirmLabel="Create account"
+        confirmLabel={linkedApp ? "Create account & approve" : "Create account"}
         tone="primary"
         busy={busy}
         onCancel={() => !busy && setConfirmOpen(false)}
@@ -586,7 +674,7 @@ function CredentialToggle({
   );
 }
 
-export function CredentialsManager() {
+export function CredentialsManager({ application }: { application?: ApplicationPrefill | null }) {
   const [page, setPage] = useState(0);
   const [size, setSize] = useState<(typeof PAGE_SIZES)[number]>(15);
   const [searchInput, setSearchInput] = useState("");
@@ -595,8 +683,9 @@ export function CredentialsManager() {
   const [items, setItems] = useState<CredentialRow[]>([]);
   const [totalPages, setTotalPages] = useState(0);
   const [totalElements, setTotalElements] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
 
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -606,39 +695,40 @@ export function CredentialsManager() {
     return () => window.clearTimeout(id);
   }, [searchInput]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({
-        page: String(page),
-        size: String(size),
-      });
-      if (q) params.set("q", q);
-      if (role !== "ALL") params.set("role", role);
-      const res = await fetch(`/api/credentials?${params.toString()}`, {
-        credentials: "include",
-        cache: "no-store",
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? "Could not load login accounts.");
-        setItems([]);
-        return;
-      }
-      setItems(Array.isArray(data.items) ? data.items : []);
-      setTotalPages(Number(data.totalPages) || 0);
-      setTotalElements(Number(data.totalElements) || 0);
-    } catch {
-      setError("Could not load login accounts.");
-    } finally {
-      setLoading(false);
-    }
+  const query = useMemo(() => {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    if (q) params.set("q", q);
+    if (role !== "ALL") params.set("role", role);
+    return params.toString();
   }, [page, size, q, role]);
+  const requestKey = `${query}#${reloadTick}`;
+  const loading = loadedKey !== requestKey;
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    const ctrl = new AbortController();
+    fetch(`/api/credentials?${query}`, { credentials: "include", cache: "no-store", signal: ctrl.signal })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError(data.error ?? "Could not load login accounts.");
+          setItems([]);
+        } else {
+          setError(null);
+          setItems(Array.isArray(data.items) ? data.items : []);
+          setTotalPages(Number(data.totalPages) || 0);
+          setTotalElements(Number(data.totalElements) || 0);
+        }
+        setLoadedKey(requestKey);
+      })
+      .catch(() => {
+        if (ctrl.signal.aborted) return;
+        setError("Could not load login accounts.");
+        setLoadedKey(requestKey);
+      });
+    return () => ctrl.abort();
+  }, [query, requestKey]);
+
+  const load = useCallback(() => setReloadTick((t) => t + 1), []);
 
   const rangeLabel = useMemo(() => {
     if (!totalElements) return "0 accounts";
@@ -661,9 +751,10 @@ export function CredentialsManager() {
         </div>
         <div className="p-5">
           <CreateUserForm
+            application={application}
             onCreated={() => {
               setPage(0);
-              void load();
+              load();
             }}
           />
         </div>

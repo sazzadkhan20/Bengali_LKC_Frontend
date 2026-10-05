@@ -5,6 +5,7 @@ import { useI18n } from "@/lib/i18n";
 import { SearchBox } from "@/components/public/SearchBox";
 import { LocalizedPosBadge } from "@/components/LocalizedPosBadge";
 import { EmptyState, IdChip, LangBadge } from "@/components/ui";
+import { CrowdsourcedBadge, LexiconUnavailable } from "@/components/public/LexiconBits";
 import type { POS } from "@/lib/types";
 
 export type SenseHitView = {
@@ -17,6 +18,8 @@ export type SenseHitView = {
   synsetPos: POS | null;
   defLang: string | null;
   defText: string | null;
+  crowdsourced: boolean;
+  validatedAt: string | null;
   relations: {
     relType: string;
     relLabel: string;
@@ -28,18 +31,24 @@ export type SenseHitView = {
 export function SenseSearchView({
   q,
   hit,
+  error,
 }: {
   q: string;
   hit: SenseHitView | null;
+  error: string | null;
 }) {
   const { t } = useI18n();
 
   return (
     <div className="py-6">
-      <SearchBox initialQuery={q} target="/search/sense" />
+      <SearchBox initialQuery={q} target="/search/sense" suggest={false} />
       <p className="mt-3 text-xs text-slate-400">{t("senseHint")}</p>
 
-      {!q ? null : !hit ? (
+      {!q ? null : error ? (
+        <div className="mt-8">
+          <LexiconUnavailable message={error} />
+        </div>
+      ) : !hit ? (
         <div className="mt-8">
           <EmptyState
             title={`${t("noSenseFound")} “${q}”`}
@@ -56,6 +65,7 @@ export function SenseSearchView({
               {hit.lemma}
             </Link>
             <LocalizedPosBadge pos={hit.pos} />
+            {hit.crowdsourced ? <CrowdsourcedBadge validatedAt={hit.validatedAt} /> : null}
             <IdChip id={hit.senseId} />
             <span className="text-xs text-slate-400">{t("belongsTo")}</span>
             <Link href={`/synset/${hit.synsetId}`}>

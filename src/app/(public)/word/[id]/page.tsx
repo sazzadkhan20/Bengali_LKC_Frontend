@@ -1,16 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 import { getSession } from "@/lib/auth";
-import {
-  entryById,
-  hypernymPath,
-  semanticNeighbourhood,
-  entriesBySynset,
-} from "@/lib/lexicon";
+import { fetchWord } from "@/lib/lexicon-api";
 import { WordLink } from "@/components/WordLink";
-import { EntryCard } from "@/components/EntryCard";
+import { WordEntryDetail } from "@/components/EntryCard";
 import { SemanticGraph } from "@/components/SemanticGraph";
+import { LexiconUnavailable } from "@/components/public/LexiconBits";
 import { Card, CardHeader, IdChip } from "@/components/ui";
+
+export const dynamic = "force-dynamic";
+
+const loadWord = cache((id: string) => fetchWord(id));
 
 export async function generateMetadata({
   params,
@@ -18,8 +19,9 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const entry = entryById.get(id);
-  return { title: entry ? `${entry.lemma} — Word` : "Word not found" };
+  const word = await loadWord(id);
+  if (word.ok) return { title: `${word.data.lemma} — Word` };
+  return { title: word.status === 404 ? "Word not found" : "Word" };
 }
 
 export default async function WordDetailPage({
@@ -28,27 +30,34 @@ export default async function WordDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const entry = entryById.get(id);
-  if (!entry) notFound();
+  const result = await loadWord(id);
+  if (!result.ok && (result.status === 404 || result.status === 400)) notFound();
 
   const session = await getSession();
   const showIds = session !== null;
-  const primarySynsetId = entry.senses[0]?.synset;
-  const graphNodes = primarySynsetId
-    ? semanticNeighbourhood(primarySynsetId)
-    : [];
-  const path = primarySynsetId ? hypernymPath(primarySynsetId) : [];
+
+  if (!result.ok) {
+    return (
+      <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
+        <LexiconUnavailable />
+      </div>
+    );
+  }
+
+  const word = result.data;
+  const path = word.hypernymPath;
+  const graphNodes = word.graph;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
-      <nav className="mb-6 text-xs text-slate-400">
+      <nav className="mb-6 text-xs text-slate-400" aria-label="Breadcrumb">
         <Link href="/dictionary" className="hover:text-emerald-700">
           Dictionary
         </Link>{" "}
-        / <span className="font-bengali text-slate-600">{entry.lemma}</span>
+        / <span className="font-bengali text-slate-600">{word.lemma}</span>
       </nav>
 
-      <EntryCard entry={entry} showIds={showIds} detailPage />
+      <WordEntryDetail word={word} showIds={showIds} />
 
       {/* Hypernym breadcrumb to the root concept (SRS §9.2) */}
       {path.length > 0 ? (
@@ -60,31 +69,38 @@ export default async function WordDetailPage({
           <div className="thin-scroll overflow-x-auto px-5 py-4">
             <ol className="flex min-w-max items-center gap-2 text-sm">
               <li className="font-bengali rounded-lg bg-emerald-700 px-3 py-1.5 font-bold text-white">
-                {entry.lemma}
+                {word.lemma}
               </li>
-              {path.map((syn) => {
-                const words = entriesBySynset.get(syn.id) ?? [];
+              {path.map((step) => {
+                const first = step.words[0];
+                const chip =
+                  "font-bengali rounded-lg bg-slate-100 px-3 py-1.5 font-semibold text-slate-700 transition hover:bg-emerald-50 hover:text-emerald-800";
                 return (
-                  <li key={syn.id} className="flex items-center gap-2">
-                    <span className="text-slate-300">→</span>
+                  <li key={step.synsetId} className="flex items-center gap-2">
+                    <span className="text-slate-300" aria-hidden>
+                      →
+                    </span>
                     {showIds ? (
                       <Link
-                        href={`/synset/${syn.id}`}
-                        className="font-bengali rounded-lg bg-slate-100 px-3 py-1.5 font-semibold text-slate-700 transition hover:bg-emerald-50 hover:text-emerald-800"
-                        title={syn.definition?.text}
+                        href={`/synset/${step.synsetId}`}
+                        className={chip}
+                        title={step.definition ?? undefined}
                       >
-                        {words[0]?.lemma ?? syn.id}
+                        {first?.lemma ?? step.synsetId}
                       </Link>
-                    ) : words[0] ? (
+                    ) : first ? (
                       <WordLink
-                        href={`/word/${words[0].id}`}
-                        className="font-bengali rounded-lg bg-slate-100 px-3 py-1.5 font-semibold text-slate-700 transition hover:bg-emerald-50 hover:text-emerald-800"
-                        title={syn.definition?.text}
+                        href={`/word/${first.id}`}
+                        className={chip}
+                        title={step.definition ?? undefined}
                       >
-                        {words[0].lemma}
+                        {first.lemma}
                       </WordLink>
                     ) : (
-                      <span className="rounded-lg bg-slate-100 px-3 py-1.5 italic text-slate-400">
+                      <span
+                        className="rounded-lg bg-slate-100 px-3 py-1.5 italic text-slate-400"
+                        title={step.definition ?? undefined}
+                      >
                         concept
                       </span>
                     )}
@@ -102,9 +118,9 @@ export default async function WordDetailPage({
           <CardHeader
             title="Semantic neighbourhood"
             subtitle={
-              showIds ? (
+              showIds && word.primarySynsetId ? (
                 <span>
-                  Immediate relations of <IdChip id={primarySynsetId!} /> —
+                  Immediate relations of <IdChip id={word.primarySynsetId} /> —
                   click a node to navigate
                 </span>
               ) : (
@@ -120,8 +136,8 @@ export default async function WordDetailPage({
                 if (node.direction === "self") return null;
                 if (showIds) return `/synset/${node.synsetId}`;
                 // Visitors navigate word-to-word, never by synset ID
-                const firstWordEntry = entriesBySynset.get(node.synsetId)?.[0];
-                return firstWordEntry ? `/word/${firstWordEntry.id}` : null;
+                const first = node.words[0];
+                return first ? `/word/${first.id}` : null;
               }}
             />
           </div>
@@ -135,9 +151,8 @@ export default async function WordDetailPage({
             subtitle="Concept hierarchy and semantic graph for this entry"
           />
           <p className="px-5 py-4 text-sm leading-relaxed text-slate-500">
-            This entry has no hypernym chain or semantic neighbours in the
-            current lexicon snapshot. The sense and definition above are the
-            full record for this word.
+            This entry has no hypernym chain or semantic neighbours yet. The
+            senses and definitions above are the full record for this word.
           </p>
         </Card>
       ) : null}
