@@ -7,11 +7,11 @@ import { SearchBox } from "./SearchBox";
 export function HomeHero() {
   const { t } = useI18n();
   return (
-    <section className="relative overflow-hidden bg-gradient-to-b from-emerald-900 via-emerald-800 to-emerald-700 text-white">
+    <section className="relative z-10 bg-gradient-to-b from-emerald-900 via-emerald-800 to-emerald-700 text-white">
       {/* decorative Bengali letters — scale down on small screens */}
       <div
         aria-hidden
-        className="font-bengali pointer-events-none absolute inset-0 select-none opacity-[0.06]"
+        className="font-bengali pointer-events-none absolute inset-0 select-none overflow-hidden opacity-[0.06]"
       >
         <span className="absolute -top-8 left-[6%] text-[clamp(4rem,18vw,11rem)]">
           ক

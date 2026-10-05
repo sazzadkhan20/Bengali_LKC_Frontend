@@ -1,16 +1,17 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import {
-  entriesBySynset,
-  hypernymPath,
-  reverseSynsetRelations,
-  semanticNeighbourhood,
-  synsetById,
-} from "@/lib/lexicon";
+import { fetchSynset } from "@/lib/lexicon-api";
 import { SemanticGraph } from "@/components/SemanticGraph";
+import {
+  CrowdsourcedBadge,
+  LexiconUnavailable,
+  ValidatedNote,
+} from "@/components/public/LexiconBits";
 import { Card, CardHeader, IdChip, LangBadge, PosBadge } from "@/components/ui";
 import { REL_LABEL } from "@/lib/format";
+
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
   params,
@@ -30,27 +31,34 @@ export default async function SynsetDetailPage({
   if (!session) redirect("/login"); // synset navigation is an authenticated feature
 
   const { id } = await params;
-  const synset = synsetById.get(id);
-  if (!synset) notFound();
+  const result = await fetchSynset(id);
+  if (!result.ok && (result.status === 404 || result.status === 400)) notFound();
+  if (!result.ok && result.status === 401) redirect("/login");
 
-  const words = entriesBySynset.get(id) ?? [];
-  const graphNodes = semanticNeighbourhood(id);
-  const path = hypernymPath(id);
-  const incoming = reverseSynsetRelations.get(id) ?? [];
+  if (!result.ok) {
+    return (
+      <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
+        <LexiconUnavailable />
+      </div>
+    );
+  }
+
+  const synset = result.data;
+  const { words, hypernymPath: path, incoming, graph: graphNodes } = synset;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
-      <nav className="mb-6 text-xs text-slate-400">
+      <nav className="mb-6 text-xs text-slate-400" aria-label="Breadcrumb">
         <Link href="/search/synset" className="hover:text-emerald-700">
           Synset Search
         </Link>{" "}
-        / <span className="font-mono text-slate-600">{id}</span>
+        / <span className="font-mono text-slate-600">{synset.id}</span>
       </nav>
 
       <Card>
-        <div className="p-6">
+        <div className="p-4 sm:p-6">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="font-mono text-xl font-bold text-slate-900">
+            <h1 className="break-all font-mono text-xl font-bold text-slate-900">
               {synset.id}
             </h1>
             <PosBadge pos={synset.pos} />
@@ -58,8 +66,14 @@ export default async function SynsetDetailPage({
               ILI {synset.ili}
             </span>
             <span className="rounded bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-inset ring-slate-200">
-              lexicalized: {String(synset.lexicalized)}
+              {synset.lexicalized ? "Lexicalized" : "Not lexicalized"}
             </span>
+            {synset.crowdsourced ? (
+              <>
+                <CrowdsourcedBadge validatedAt={synset.validatedAt} size="md" />
+                <ValidatedNote validatedAt={synset.validatedAt} />
+              </>
+            ) : null}
           </div>
 
           {synset.definition ? (
@@ -76,7 +90,7 @@ export default async function SynsetDetailPage({
 
           <div className="mt-5 border-t border-slate-100 pt-4">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-              Bengali words in this synset ({words.length})
+              Bengali words in this synset ({synset.wordCount})
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
               {words.length === 0 ? (
@@ -88,12 +102,22 @@ export default async function SynsetDetailPage({
                   <Link
                     key={w.id}
                     href={`/word/${w.id}`}
-                    className="font-bengali rounded-xl bg-emerald-50 px-3 py-1.5 text-base font-semibold text-emerald-900 ring-1 ring-inset ring-emerald-200 transition hover:bg-emerald-100"
+                    className={`font-bengali rounded-xl px-3 py-1.5 text-base font-semibold ring-1 ring-inset transition ${
+                      w.crowdsourced
+                        ? "bg-amber-50 text-amber-900 ring-amber-200 hover:bg-amber-100"
+                        : "bg-emerald-50 text-emerald-900 ring-emerald-200 hover:bg-emerald-100"
+                    }`}
+                    title={w.crowdsourced ? "Crowdsourced word" : undefined}
                   >
                     {w.lemma}
                   </Link>
                 ))
               )}
+              {synset.wordCount > words.length ? (
+                <span className="self-center text-xs text-slate-400">
+                  +{synset.wordCount - words.length} more
+                </span>
+              ) : null}
             </div>
           </div>
         </div>
@@ -102,74 +126,68 @@ export default async function SynsetDetailPage({
       {/* Hypernym path breadcrumb (SRS §9.2) */}
       {path.length > 0 ? (
         <Card className="mt-6">
-          <CardHeader title="Hypernym path" subtitle="Chain of is-a relations up to the root concept" />
+          <CardHeader
+            title="Hypernym path"
+            subtitle="Chain of is-a relations up to the root concept"
+          />
           <div className="thin-scroll overflow-x-auto px-5 py-4">
             <ol className="flex min-w-max items-center gap-2 text-sm">
               <li className="rounded-lg bg-emerald-700 px-3 py-1.5 font-mono text-xs font-bold text-white">
                 {synset.id}
               </li>
-              {path.map((syn) => {
-                const w = entriesBySynset.get(syn.id) ?? [];
-                return (
-                  <li key={syn.id} className="flex items-center gap-2">
-                    <span className="text-slate-300">→</span>
-                    <Link
-                      href={`/synset/${syn.id}`}
-                      className="rounded-lg bg-slate-100 px-3 py-1.5 transition hover:bg-emerald-50"
-                      title={syn.definition?.text}
-                    >
-                      <span className="font-bengali font-semibold text-slate-700">
-                        {w[0]?.lemma ?? "—"}
-                      </span>{" "}
-                      <span className="font-mono text-[10px] text-slate-400">
-                        {syn.id}
-                      </span>
-                    </Link>
-                  </li>
-                );
-              })}
+              {path.map((step) => (
+                <li key={step.synsetId} className="flex items-center gap-2">
+                  <span className="text-slate-300" aria-hidden>
+                    →
+                  </span>
+                  <Link
+                    href={`/synset/${step.synsetId}`}
+                    className="rounded-lg bg-slate-100 px-3 py-1.5 transition hover:bg-emerald-50"
+                    title={step.definition ?? undefined}
+                  >
+                    <span className="font-bengali font-semibold text-slate-700">
+                      {step.words[0]?.lemma ?? "—"}
+                    </span>{" "}
+                    <span className="font-mono text-[10px] text-slate-400">
+                      {step.synsetId}
+                    </span>
+                  </Link>
+                </li>
+              ))}
             </ol>
           </div>
         </Card>
       ) : null}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        {/* Outgoing relations */}
         <Card>
           <CardHeader title="Outgoing relations" subtitle="This synset → target" />
           <ul className="divide-y divide-slate-100 px-5">
-            {(synset.relations ?? []).map((rel, i) => {
-              const targetWords = entriesBySynset.get(rel.target) ?? [];
-              const target = synsetById.get(rel.target);
-              return (
-                <li key={`${rel.target}-${i}`} className="py-3">
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="rounded bg-slate-50 px-1.5 py-0.5 text-xs font-medium ring-1 ring-inset ring-slate-200">
-                      {REL_LABEL[rel.relType] ?? rel.relType}
-                    </span>
-                    <Link href={`/synset/${rel.target}`}>
-                      <IdChip id={rel.target} />
+            {synset.relations.map((rel, i) => (
+              <li key={`${rel.target}-${i}`} className="py-3">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="rounded bg-slate-50 px-1.5 py-0.5 text-xs font-medium ring-1 ring-inset ring-slate-200">
+                    {REL_LABEL[rel.relType] ?? rel.relType}
+                  </span>
+                  <Link href={`/synset/${rel.target}`}>
+                    <IdChip id={rel.target} />
+                  </Link>
+                  {rel.words.map((w) => (
+                    <Link
+                      key={w.id}
+                      href={`/word/${w.id}`}
+                      className="font-bengali font-semibold text-emerald-700 hover:underline"
+                    >
+                      {w.lemma}
                     </Link>
-                    {targetWords.slice(0, 3).map((w) => (
-                      <Link
-                        key={w.id}
-                        href={`/word/${w.id}`}
-                        className="font-bengali font-semibold text-emerald-700 hover:underline"
-                      >
-                        {w.lemma}
-                      </Link>
-                    ))}
-                  </div>
-                  {target?.definition ? (
-                    <p className="mt-1 text-xs italic text-slate-400">
-                      {target.definition.text.slice(0, 110)}
-                      {target.definition.text.length > 110 ? "…" : ""}
-                    </p>
-                  ) : null}
-                </li>
-              );
-            })}
-            {(synset.relations ?? []).length === 0 ? (
+                  ))}
+                </div>
+                {rel.definition ? (
+                  <p className="mt-1 text-xs italic text-slate-400">{rel.definition}</p>
+                ) : null}
+              </li>
+            ))}
+            {synset.relations.length === 0 ? (
               <li className="py-4 text-sm italic text-slate-400">
                 No outgoing relations.
               </li>
@@ -177,49 +195,47 @@ export default async function SynsetDetailPage({
           </ul>
         </Card>
 
-        {/* Incoming relations */}
         <Card>
           <CardHeader title="Incoming relations" subtitle="Source → this synset" />
           <ul className="divide-y divide-slate-100 px-5">
-            {incoming.slice(0, 20).map((rel, i) => {
-              const sourceWords = entriesBySynset.get(rel.source) ?? [];
-              return (
-                <li key={`${rel.source}-${i}`} className="py-3">
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="rounded bg-slate-50 px-1.5 py-0.5 text-xs font-medium ring-1 ring-inset ring-slate-200">
-                      {REL_LABEL[rel.relType] ?? rel.relType}
-                    </span>
-                    <Link href={`/synset/${rel.source}`}>
-                      <IdChip id={rel.source} />
+            {incoming.map((rel, i) => (
+              <li key={`${rel.source}-${i}`} className="py-3">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="rounded bg-slate-50 px-1.5 py-0.5 text-xs font-medium ring-1 ring-inset ring-slate-200">
+                    {REL_LABEL[rel.relType] ?? rel.relType}
+                  </span>
+                  <Link href={`/synset/${rel.source}`}>
+                    <IdChip id={rel.source} />
+                  </Link>
+                  {rel.words.map((w) => (
+                    <Link
+                      key={w.id}
+                      href={`/word/${w.id}`}
+                      className="font-bengali font-semibold text-emerald-700 hover:underline"
+                    >
+                      {w.lemma}
                     </Link>
-                    {sourceWords.slice(0, 3).map((w) => (
-                      <Link
-                        key={w.id}
-                        href={`/word/${w.id}`}
-                        className="font-bengali font-semibold text-emerald-700 hover:underline"
-                      >
-                        {w.lemma}
-                      </Link>
-                    ))}
-                  </div>
-                </li>
-              );
-            })}
+                  ))}
+                </div>
+                {rel.definition ? (
+                  <p className="mt-1 text-xs italic text-slate-400">{rel.definition}</p>
+                ) : null}
+              </li>
+            ))}
             {incoming.length === 0 ? (
               <li className="py-4 text-sm italic text-slate-400">
                 No incoming relations.
               </li>
             ) : null}
-            {incoming.length > 20 ? (
+            {synset.incomingTotal > incoming.length ? (
               <li className="py-3 text-xs text-slate-400">
-                +{incoming.length - 20} more incoming relations
+                +{synset.incomingTotal - incoming.length} more incoming relations
               </li>
             ) : null}
           </ul>
         </Card>
       </div>
 
-      {/* Graph */}
       {graphNodes.length > 1 ? (
         <Card className="mt-6">
           <CardHeader

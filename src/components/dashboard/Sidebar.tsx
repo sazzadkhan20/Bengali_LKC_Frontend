@@ -30,6 +30,7 @@ function navFor(role: Role): NavItem[] {
       return [
         ...common,
         { href: "/dashboard/users", labelKey: "navUsers", icon: "👥" },
+        { href: "/dashboard/applications", labelKey: "navApplications", icon: "📨" },
         { href: "/dashboard/credentials", labelKey: "navCredentials", icon: "🔑" },
         { href: "/dashboard/queue", labelKey: "navQueue", icon: "🗂" },
         { href: "/dashboard/quick-input", labelKey: "navQuickInput", icon: "✎" },

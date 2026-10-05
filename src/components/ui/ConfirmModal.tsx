@@ -49,7 +49,7 @@ export function ConfirmModal({
 
   const confirmCls =
     tone === "danger"
-      ? "bg-rose-700 hover:bg-rose-800"
+      ? "bg-red-700 hover:bg-red-800"
       : tone === "warning"
         ? "bg-amber-600 hover:bg-amber-700"
         : "bg-emerald-700 hover:bg-emerald-800";

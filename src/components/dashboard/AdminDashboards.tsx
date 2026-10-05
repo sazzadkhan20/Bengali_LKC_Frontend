@@ -13,6 +13,11 @@ import { ActivityFeed, CaseList, EmptyRow, Shortcuts, ViewAll } from "./Dashboar
 export function ArchitectDashboard({ session, data }: { session: Session; data: ArchitectData }) {
   const { counts, users, lexicon } = data;
   const alerts: { text: string; href: string }[] = [];
+  if (data.newApplications > 0)
+    alerts.push({
+      text: `${data.newApplications} contributor application${data.newApplications === 1 ? " is" : "s are"} waiting for review`,
+      href: "/dashboard/applications",
+    });
   if (users.suspended > 0)
     alerts.push({
       text: `${users.suspended} suspended account${users.suspended === 1 ? "" : "s"} awaiting review`,
@@ -130,6 +135,12 @@ export function ArchitectDashboard({ session, data }: { session: Session; data: 
           <CardHeader title="Shortcut actions" />
           <Shortcuts
             items={[
+              {
+                href: "/dashboard/applications",
+                label: data.newApplications > 0 ? `Applications (${data.newApplications})` : "Applications",
+                icon: "📨",
+              },
+              { href: "/dashboard/statistics", label: "Statistics", icon: "📊" },
               { href: "/dashboard/credentials", label: "Issue Credential", icon: "🔑" },
               { href: "/dashboard/users", label: "Manage Users", icon: "👤" },
               { href: "/dashboard/export", label: "XML Export", icon: "⇩" },
@@ -293,21 +304,44 @@ export function ModeratorDashboard({
             now={now}
             action={(c) => (
               <Link
-                href={`/dashboard/arbitration/${c.id}`}
+                href={`/dashboard/quick-input?tieCase=${encodeURIComponent(c.id)}`}
                 className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-amber-700"
               >
-                Resolve →
+                Correct & validate →
               </Link>
             )}
           />
-          <CardHeader title="Pending corrections" subtitle="Panel decisions that asked for a correction" />
-          <CaseList
-            cases={data.pendingCorrections}
-            empty="No corrections pending."
-            now={now}
-            subtitle={(c) => <span className="break-words">{c.correctionNote}</span>}
-            action={() => <ViewAll href="/dashboard/corrections">Apply →</ViewAll>}
+          <CardHeader
+            title="Recent tie corrections"
+            subtitle="Entries you corrected and validated to close a tie"
+            action={<ViewAll href="/dashboard/corrections">Corrections →</ViewAll>}
           />
+          {data.recentCorrections.length === 0 ? (
+            <EmptyRow>No tie corrections yet.</EmptyRow>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {data.recentCorrections.map((r) => (
+                <li key={r.caseId} className="px-4 py-3 sm:px-5">
+                  <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
+                    <Link
+                      href={`/dashboard/submissions/${encodeURIComponent(r.submissionId)}`}
+                      className="font-bengali font-semibold text-slate-800 hover:underline"
+                    >
+                      {r.word}
+                    </Link>
+                    <span className="font-mono text-[11px] text-slate-400">{r.caseId}</span>
+                    {r.resolvedAt ? <span className="text-xs text-slate-500">{timeAgo(r.resolvedAt)}</span> : null}
+                  </p>
+                  <p className="mt-0.5 break-words text-xs text-slate-500">
+                    {r.changes.length === 0
+                      ? "Validated without changes"
+                      : `Changed: ${r.changes.map((c) => c.field).join(", ")}`}
+                    {r.moderatorName ? ` · by ${r.moderatorName}` : ""}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       </div>
 

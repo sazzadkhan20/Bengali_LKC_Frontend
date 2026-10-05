@@ -1,4 +1,4 @@
-import type { GraphNode } from "@/lib/lexicon";
+import type { GraphNode } from "@/lib/lexicon-api";
 
 const REL_COLOR: Record<string, string> = {
   hypernym: "#576139",
@@ -54,7 +54,7 @@ export function SemanticGraph({
   });
 
   const label = (n: GraphNode, max = 16) => {
-    const word = n.words[0] ?? (showIds ? n.synsetId : "—");
+    const word = n.words[0]?.lemma ?? (showIds ? n.synsetId : "—");
     return word.length > max ? `${word.slice(0, max)}…` : word;
   };
 
@@ -103,6 +103,11 @@ export function SemanticGraph({
               className={href ? "cursor-pointer" : undefined}
               key={`node-${node.synsetId}-${node.relation}`}
             >
+              <title>
+                {[node.words.map((w) => w.lemma).join(", "), node.definition]
+                  .filter(Boolean)
+                  .join(" — ") || node.synsetId}
+              </title>
               <circle
                 cx={x}
                 cy={y}
