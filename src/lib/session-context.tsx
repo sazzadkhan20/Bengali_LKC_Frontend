@@ -88,7 +88,14 @@ export function SessionProvider({
   initial?: AuthSessionData | null;
 }) {
   const [data, setData] = useState<AuthSessionData | null>(initial ?? null);
-  const [loading, setLoading] = useState(!initial);
+  const [loading, setLoading] = useState(false);
+  // The root layout re-resolves the session on every server render (navigation, router.refresh()),
+  // so adopt its newer value instead of re-fetching from the browser.
+  const [serverInitial, setServerInitial] = useState(initial);
+  if (initial !== serverInitial) {
+    setServerInitial(initial);
+    setData(initial ?? null);
+  }
 
   const apply = useCallback((mapped: AuthSessionData | null) => {
     setData(mapped);
@@ -102,17 +109,6 @@ export function SessionProvider({
   }, [apply]);
 
   const clear = useCallback(() => setData(null), []);
-
-  useEffect(() => {
-    // Always reconcile with backend so profile/permissions stay fresh after login.
-    let cancelled = false;
-    fetchSession().then((mapped) => {
-      if (!cancelled) apply(mapped);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [apply]);
 
   // Proactively refresh access token ~2 minutes before expiry (1-hour sessions).
   useEffect(() => {

@@ -57,7 +57,7 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const payload = await getSessionPayload().catch(() => null);
+  const payload = await getSessionPayload();
   const initial = payload
     ? {
         session: payload.session,

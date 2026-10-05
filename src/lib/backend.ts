@@ -1,5 +1,6 @@
 import "server-only";
 import { headers as requestHeaders } from "next/headers";
+import { unstable_rethrow } from "next/navigation";
 
 /**
  * Server-side client for the Bengali LKC Spring Boot API.
@@ -32,7 +33,8 @@ async function visitorIp(): Promise<string | null> {
       h.get("x-real-ip")?.trim() ||
       null
     );
-  } catch {
+  } catch (err) {
+    unstable_rethrow(err);
     return null; // outside a request scope
   }
 }

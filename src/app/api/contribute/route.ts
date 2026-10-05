@@ -1,7 +1,17 @@
 import { NextResponse } from "next/server";
 import { backendFetch } from "@/lib/backend";
 
-const FIELDS = ["name", "email", "phone", "institution", "interestRole", "message", "honeypot"] as const;
+const FIELDS = [
+  "name",
+  "email",
+  "phone",
+  "dob",
+  "institution",
+  "occupation",
+  "interestRole",
+  "message",
+  "honeypot",
+] as const;
 
 export async function POST(req: Request) {
   let raw: unknown;

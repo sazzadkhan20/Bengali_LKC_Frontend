@@ -307,7 +307,7 @@ export function SubmissionBrowser({
         </p>
       ) : null}
 
-      <div className="thin-scroll overflow-x-auto">
+      <div className="thin-scroll relative overflow-x-auto">
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead>
             <tr className="border-b border-slate-100 text-[11px] uppercase tracking-wider text-slate-400">

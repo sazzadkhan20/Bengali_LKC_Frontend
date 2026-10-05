@@ -83,6 +83,13 @@ to the registered email address.
 
 ## Deployment (Docker)
 
+Production runs on one server with the backend, PostgreSQL and nginx, and deploys
+automatically when a GitHub Release tagged `prod-*` is published in this repo. The full
+step-by-step guide is `DEPLOYMENT.md` in the
+[Bengali_LKC_Backend](https://github.com/sazzadkhan20/Bengali_LKC_Backend) repository.
+
+For a standalone container:
+
 ```bash
 docker build -t bengali-lkc .
 docker run -d -p 3000:3000 --name bengali-lkc bengali-lkc
@@ -93,7 +100,13 @@ docker compose up -d --build
 The image is a multi-stage build on `node:22-alpine` using Next.js standalone
 output, runs as a non-root user and includes a healthcheck. Put it behind the
 university reverse proxy (nginx/Apache) with TLS termination — HTTPS is
-mandatory per SRS §12.3.
+mandatory per SRS §12.3: production builds set the session cookies as
+`Secure`, so sign-in only works over HTTPS (or on `localhost`).
+
+Set `BACKEND_API_URL` to the Spring Boot API base URL as seen from the
+frontend server (for example `http://backend:8080` on a shared Docker
+network). `docker-compose.yml` defaults it to the API running on the Docker
+host.
 
 ## Architecture notes
 

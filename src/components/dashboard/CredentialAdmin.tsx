@@ -177,7 +177,9 @@ export type ApplicationPrefill = {
   id: string;
   name: string;
   email: string;
+  dob: string | null;
   institution: string | null;
+  occupation: string | null;
   interestRole: string | null;
 };
 
@@ -193,20 +195,48 @@ const EMPTY_FORM: CreateForm = {
 
 const ISSUABLE_ROLES = new Set<string>(ROLE_OPTIONS.map((r) => r.value));
 
-function suggestUsername(email: string): string {
-  const local = email.split("@")[0]?.toLowerCase() ?? "";
-  const cleaned = local.replace(/[^a-z0-9._-]/g, "").slice(0, 30);
-  return cleaned.length >= 3 ? cleaned : "";
+function usernameBase(app: ApplicationPrefill): string {
+  const fromEmail = (app.email.split("@")[0] ?? "")
+    .toLowerCase()
+    .split("+")[0]
+    .replace(/[^a-z0-9._-]/g, "")
+    .replace(/^[._-]+|[._-]+$/g, "");
+  if (fromEmail.length >= 3) return fromEmail.slice(0, 26);
+  const fromName = app.name
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9\s]/g, "")
+    .trim()
+    .replace(/\s+/g, ".");
+  return fromName.length >= 3 ? fromName.slice(0, 26) : "";
 }
 
-function formFromApplication(app: ApplicationPrefill | null | undefined): CreateForm {
+/** First free username derived from the applicant, e.g. "nusrat", then "nusrat2", "nusrat3"… */
+function suggestUsername(app: ApplicationPrefill, taken: string[] = []): string {
+  const base = usernameBase(app);
+  if (!base) return "";
+  const used = new Set(taken);
+  if (!used.has(base)) return base;
+  for (let n = 2; n < 1000; n++) {
+    const candidate = `${base}${n}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return "";
+}
+
+function formFromApplication(
+  app: ApplicationPrefill | null | undefined,
+  takenUsernames: string[] = []
+): CreateForm {
   if (!app) return EMPTY_FORM;
   return {
     ...EMPTY_FORM,
     name: app.name,
     email: app.email,
-    username: suggestUsername(app.email),
+    username: suggestUsername(app, takenUsernames),
+    dob: app.dob ?? "",
     institution: app.institution ?? "",
+    occupation: app.occupation ?? "",
     role: app.interestRole && ISSUABLE_ROLES.has(app.interestRole) ? (app.interestRole as Role) : "CONTRIBUTOR",
   };
 }
@@ -245,12 +275,14 @@ export function CreateUserForm({
       };
       setIdentifiers(next);
       if (application) {
-        // Surface conflicts in the prefilled values (e.g. the applicant already has an account).
-        const prefilled = formFromApplication(application);
-        const { errors } = validateCreateForm(prefilled, next, {
-          requireComplete: false,
-          keys: ["name", "username", "email"],
-        });
+        // Re-derive the username against taken ones, unless the architect already edited it.
+        const initial = formFromApplication(application);
+        const prefilled = formFromApplication(application, next.usernames);
+        setForm((current) =>
+          current.username === initial.username ? { ...current, username: prefilled.username } : current
+        );
+        // Surface anything still missing or conflicting (e.g. older requests without a date of birth).
+        const { errors } = validateCreateForm(prefilled, next, { requireComplete: false });
         setFieldErrors(errors);
       }
     })();
@@ -383,12 +415,12 @@ export function CreateUserForm({
               Issuing an account for application <span className="font-mono">{linkedApp.id}</span>
             </p>
             <p className="mt-0.5 text-xs text-sky-800">
-              Name, email, institution and role are prefilled from the request
+              All details are prefilled from the request and a free username is suggested
               {linkedApp.interestRole && !ISSUABLE_ROLES.has(linkedApp.interestRole)
                 ? " (the applicant chose “Other”, so the role defaults to Lexical Contributor)"
                 : ""}
-              . Review them, add the date of birth and occupation, then create the account. The application is
-              approved automatically.
+              . Review them, adjust the role if needed, then create the account. The application is approved
+              automatically.
             </p>
           </div>
           <button
@@ -795,7 +827,7 @@ export function CredentialsManager({ application }: { application?: ApplicationP
           </p>
         ) : null}
 
-        <div className="thin-scroll overflow-x-auto">
+        <div className="thin-scroll relative overflow-x-auto">
           <table className="w-full min-w-[800px] text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-[11px] uppercase tracking-wider text-slate-400">

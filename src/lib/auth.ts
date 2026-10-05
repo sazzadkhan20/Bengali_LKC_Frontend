@@ -1,5 +1,7 @@
 import "server-only";
+import { cache } from "react";
 import { cookies } from "next/headers";
+import { unstable_rethrow } from "next/navigation";
 import type { Role, Session, User } from "./types";
 import { backendFetch } from "./backend";
 import { ACCESS_COOKIE, REFRESH_COOKIE } from "./auth-cookies";
@@ -124,10 +126,15 @@ export async function getSession(): Promise<Session | null> {
   return payload?.session ?? null;
 }
 
-/** Full session payload (profile, permissions, standing) for authenticated UI. */
-export async function getSessionPayload(): Promise<SessionPayload | null> {
+/**
+ * Full session payload (profile, permissions, standing) for authenticated UI.
+ * Cached per request: the root layout and the page both ask for it on every render.
+ */
+export const getSessionPayload = cache(loadSessionPayload);
+
+async function loadSessionPayload(): Promise<SessionPayload | null> {
+  const jar = await cookies();
   try {
-    const jar = await cookies();
     let access = jar.get(ACCESS_COOKIE)?.value ?? null;
     const refresh = jar.get(REFRESH_COOKIE)?.value ?? null;
     if (!access && !refresh) return null;
@@ -187,6 +194,7 @@ export async function getSessionPayload(): Promise<SessionPayload | null> {
       mustChangePassword: Boolean(result.data.mustChangePassword),
     };
   } catch (err) {
+    unstable_rethrow(err);
     console.error("[getSessionPayload]", err);
     return null;
   }

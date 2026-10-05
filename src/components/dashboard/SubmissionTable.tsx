@@ -38,7 +38,7 @@ export function SubmissionTable({
           </li>
         ))}
       </ul>
-      <div className="thin-scroll hidden overflow-x-auto sm:block">
+      <div className="thin-scroll relative hidden overflow-x-auto sm:block">
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-slate-100 text-[11px] uppercase tracking-wider text-slate-400">

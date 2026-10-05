@@ -187,7 +187,7 @@ export default async function ExportPage({ searchParams }: { searchParams: Promi
               </div>
             ) : (
               <>
-                <div className="thin-scroll hidden overflow-x-auto md:block">
+                <div className="thin-scroll relative hidden overflow-x-auto md:block">
                   <table className="w-full min-w-[760px] text-left text-sm">
                     <thead>
                       <tr className="border-b border-slate-100 text-[11px] uppercase tracking-wider text-slate-400">
