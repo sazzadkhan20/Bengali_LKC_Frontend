@@ -12,6 +12,7 @@ export const dynamic = "force-dynamic";
 type ApplicationRow = ApplicationPrefill & {
   status: "NEW" | "APPROVED" | "REJECTED";
   issuedUsername: string | null;
+  existingAccount: { id: string; username: string } | null;
   error?: string;
 };
 
@@ -30,8 +31,22 @@ async function loadApplication(id: string): Promise<{ app: ApplicationPrefill | 
             : `Application ${a.id} was rejected, so no account can be issued for it.`,
       };
     }
+    if (a.existingAccount) {
+      return {
+        app: null,
+        notice: `${a.email} already belongs to the account ${a.existingAccount.username}, so no new account can be issued for application ${a.id}. Reject it from the applications page instead.`,
+      };
+    }
     return {
-      app: { id: a.id, name: a.name, email: a.email, institution: a.institution, interestRole: a.interestRole },
+      app: {
+        id: a.id,
+        name: a.name,
+        email: a.email,
+        dob: a.dob,
+        institution: a.institution,
+        occupation: a.occupation,
+        interestRole: a.interestRole,
+      },
       notice: null,
     };
   } catch {

@@ -16,7 +16,8 @@ import { isAccessTokenFresh, refreshTokens, type RotatedTokens } from "@/lib/tok
  * An expired (or about-to-expire) access token is refreshed before the call, and a
  * 401 triggers one refresh + retry, so the first request after the 1-hour access
  * window never fails. Rotated tokens are written onto `response`; Server Components
- * cannot set cookies, so they only use `data` and the SessionProvider persists them.
+ * cannot set cookies, so they only use `data` and rely on `src/proxy.ts` having
+ * renewed the tokens before rendering.
  */
 export async function backendAuthedFetch<T = Record<string, unknown>>(
   path: string,

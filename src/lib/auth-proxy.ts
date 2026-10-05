@@ -1,29 +1,17 @@
 import { NextResponse } from "next/server";
 import { backendFetch } from "@/lib/backend";
-import { clearAuthCookies, setAuthCookies } from "@/lib/auth-cookies";
+import { clearAuthCookies, setAuthCookies, tokensFromBody } from "@/lib/auth-cookies";
 import { refreshTokens } from "@/lib/token-refresh";
 
-type AuthBody = Record<string, unknown> & {
-  accessToken?: string;
-  refreshToken?: string;
-  expiresIn?: number;
-  error?: string;
-};
-
 /** Apply rotated tokens from a backend auth response onto the Next.js response. */
-export function applyTokenResponse(res: NextResponse, data: AuthBody) {
-  if (typeof data.accessToken === "string") {
-    setAuthCookies(res, {
-      accessToken: data.accessToken,
-      refreshToken: typeof data.refreshToken === "string" ? data.refreshToken : undefined,
-      expiresIn: typeof data.expiresIn === "number" ? data.expiresIn : 3600,
-    });
-  }
+export function applyTokenResponse(res: NextResponse, data: Record<string, unknown>) {
+  const tokens = tokensFromBody(data);
+  if (tokens) setAuthCookies(res, tokens);
   return res;
 }
 
 export async function proxyLogin(username: string, password: string) {
-  const result = await backendFetch<AuthBody>("/api/auth/login", {
+  const result = await backendFetch<Record<string, unknown>>("/api/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });

@@ -1,17 +1,8 @@
 import "server-only";
 import { backendFetch } from "@/lib/backend";
+import { tokensFromBody, type AuthTokens } from "@/lib/auth-cookies";
 
-export type RotatedTokens = {
-  accessToken: string;
-  refreshToken?: string;
-  expiresIn: number;
-};
-
-type AuthBody = Record<string, unknown> & {
-  accessToken?: string;
-  refreshToken?: string;
-  expiresIn?: number;
-};
+export type RotatedTokens = AuthTokens;
 
 /**
  * The backend rotates refresh tokens and revokes the old one on use, so parallel
@@ -30,7 +21,11 @@ const globalStore = globalThis as typeof globalThis & { __lkcTokenRefresh?: Refr
 const store = (globalStore.__lkcTokenRefresh ??= { inflight: new Map(), recent: new Map() });
 const { inflight, recent } = store;
 
-export function refreshTokens(refreshToken: string): Promise<RotatedTokens | null> {
+/** `forwardedFor` must be passed when called outside a request scope where `headers()` works (e.g. proxy). */
+export function refreshTokens(
+  refreshToken: string,
+  forwardedFor?: string
+): Promise<RotatedTokens | null> {
   const now = Date.now();
   for (const [key, entry] of recent) {
     if (now - entry.at > GRACE_MS) recent.delete(key);
@@ -41,18 +36,14 @@ export function refreshTokens(refreshToken: string): Promise<RotatedTokens | nul
   const pending = inflight.get(refreshToken);
   if (pending) return pending;
 
-  const promise = backendFetch<AuthBody>("/api/auth/refresh", {
+  const promise = backendFetch<Record<string, unknown>>("/api/auth/refresh", {
     method: "POST",
     refreshToken,
+    headers: forwardedFor ? { "X-Forwarded-For": forwardedFor } : undefined,
   })
     .then((res) => {
-      if (!res.ok || typeof res.data.accessToken !== "string") return null;
-      const tokens: RotatedTokens = {
-        accessToken: res.data.accessToken,
-        refreshToken:
-          typeof res.data.refreshToken === "string" ? res.data.refreshToken : undefined,
-        expiresIn: typeof res.data.expiresIn === "number" ? res.data.expiresIn : 3600,
-      };
+      const tokens = res.ok ? tokensFromBody(res.data) : null;
+      if (!tokens) return null;
       recent.set(refreshToken, { tokens, at: Date.now() });
       return tokens;
     })

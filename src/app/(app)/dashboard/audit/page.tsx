@@ -229,7 +229,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
       ) : (
         <>
           <Card>
-            <div className="hidden overflow-x-auto md:block">
+            <div className="relative hidden overflow-x-auto md:block">
               <table className="w-full text-left text-sm">
                 <thead className="border-b border-slate-100 text-[11px] font-bold uppercase tracking-wide text-slate-400">
                   <tr>

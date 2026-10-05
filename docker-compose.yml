@@ -12,6 +12,10 @@ services:
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
       NEXT_TELEMETRY_DISABLED: "1"
+      # Spring Boot API as reachable from inside this container
+      BACKEND_API_URL: ${BACKEND_API_URL:-http://host.docker.internal:8080}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]

@@ -13,6 +13,8 @@ export type Application = {
   email: string;
   phone: string;
   institution: string | null;
+  occupation: string | null;
+  dob: string | null;
   interestRole: string | null;
   message: string;
   status: ApplicationStatus;
@@ -23,6 +25,8 @@ export type Application = {
   issuedUserId: string | null;
   issuedUsername: string | null;
   issuedRole: string | null;
+  /** Another account already uses this email, so no new account can be issued for it. */
+  existingAccount: { id: string; username: string } | null;
 };
 
 const INTEREST_LABEL: Record<string, string> = {
@@ -56,6 +60,17 @@ export function dhakaDateTime(iso: string | null): string {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+  });
+}
+
+function formatDob(dob: string | null): string {
+  if (!dob) return "—";
+  const [y, m, d] = dob.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-GB", {
+    timeZone: "UTC",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
   });
 }
 
@@ -142,8 +157,12 @@ export function ApplicationCard({ app }: { app: Application }) {
               {app.phone}
             </a>
           </dd>
+          <dt className="text-slate-400">Born</dt>
+          <dd className="min-w-0 text-slate-700">{formatDob(app.dob)}</dd>
           <dt className="text-slate-400">Institution</dt>
           <dd className="min-w-0 break-words text-slate-700">{app.institution ?? "—"}</dd>
+          <dt className="text-slate-400">Occupation</dt>
+          <dd className="min-w-0 break-words text-slate-700">{app.occupation ?? "—"}</dd>
           <dt className="text-slate-400">Interest</dt>
           <dd className="min-w-0 text-slate-700">
             {app.interestRole ? INTEREST_LABEL[app.interestRole] ?? app.interestRole : "Not sure yet"}
@@ -191,6 +210,20 @@ export function ApplicationCard({ app }: { app: Application }) {
         </p>
       ) : null}
 
+      {app.status === "NEW" && app.existingAccount ? (
+        <p role="alert" className="border-t border-red-100 bg-red-50 px-4 py-2.5 text-sm text-red-700 sm:px-5">
+          This email already belongs to the account{" "}
+          <Link
+            href={`/dashboard/community/profile/${encodeURIComponent(app.existingAccount.id)}`}
+            className="font-mono font-semibold underline hover:text-red-800"
+          >
+            {app.existingAccount.username}
+          </Link>
+          , so a new account cannot be issued. Reject this request with a note pointing the applicant to their existing
+          account.
+        </p>
+      ) : null}
+
       {app.status === "NEW" ? (
         <footer className="flex flex-col-reverse gap-2 border-t border-slate-100 px-4 py-3 sm:flex-row sm:justify-end sm:px-5">
           <button
@@ -200,12 +233,21 @@ export function ApplicationCard({ app }: { app: Application }) {
           >
             Reject…
           </button>
-          <Link
-            href={`/dashboard/credentials?application=${encodeURIComponent(app.id)}`}
-            className="rounded-xl bg-emerald-700 px-4 py-2 text-center text-sm font-bold text-white transition hover:bg-emerald-800"
-          >
-            Approve & issue account →
-          </Link>
+          {app.existingAccount ? (
+            <span
+              aria-disabled
+              className="cursor-not-allowed rounded-xl bg-slate-200 px-4 py-2 text-center text-sm font-bold text-slate-500"
+            >
+              Approve & issue account
+            </span>
+          ) : (
+            <Link
+              href={`/dashboard/credentials?application=${encodeURIComponent(app.id)}`}
+              className="rounded-xl bg-emerald-700 px-4 py-2 text-center text-sm font-bold text-white transition hover:bg-emerald-800"
+            >
+              Approve & issue account →
+            </Link>
+          )}
         </footer>
       ) : null}
 

@@ -237,7 +237,7 @@ export function ArbitrationBrowser({
         <p className="m-5 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700 ring-1 ring-red-200">{error}</p>
       ) : null}
 
-      <div className="thin-scroll overflow-x-auto">
+      <div className="thin-scroll relative overflow-x-auto">
         <table className="w-full min-w-[960px] text-left text-sm">
           <thead>
             <tr className="bg-slate-50/80 text-[11px] uppercase tracking-wider text-slate-400">

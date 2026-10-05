@@ -236,6 +236,12 @@ export const STRINGS = {
   email: { en: "Email", bn: "ইমেইল" },
   phone: { en: "Phone number", bn: "ফোন নম্বর" },
   institution: { en: "Institution / affiliation", bn: "প্রতিষ্ঠান / সংযুক্তি" },
+  dateOfBirth: { en: "Date of birth", bn: "জন্ম তারিখ" },
+  occupation: { en: "Occupation", bn: "পেশা" },
+  authorDetailsHint: {
+    en: "Date of birth, institution and occupation are recorded as author information on your account if you are approved.",
+    bn: "অনুমোদিত হলে জন্ম তারিখ, প্রতিষ্ঠান ও পেশা আপনার অ্যাকাউন্টে লেখক-তথ্য হিসেবে সংরক্ষিত হবে।",
+  },
   interestRole: { en: "Role you are interested in", bn: "আপনার আগ্রহের ভূমিকা" },
   whyJoin: { en: "Why do you want to join Ben-LKC?", bn: "কেন Ben-LKC-তে যোগ দিতে চান?" },
   submitRequest: {
