@@ -309,7 +309,12 @@ export default async function ArbitrationCasePage({ params }: { params: Promise<
               <DefinitionList
                 definitions={
                   s.definitions || s.synsetDefinitions
-                    ? [...(s.synsetDefinitions ?? []), ...(s.definitions ?? [])]
+                    ? [
+                        ...(s.synsetDefinitions ?? []).filter(
+                          (d) => !(s.definitions ?? []).some((o) => o.language === d.language && o.text === d.text)
+                        ),
+                        ...(s.definitions ?? []),
+                      ]
                     : s.definition
                       ? [{ language: "ben", text: s.definition }]
                       : []
