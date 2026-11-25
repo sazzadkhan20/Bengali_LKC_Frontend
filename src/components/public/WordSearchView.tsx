@@ -11,7 +11,7 @@ import {
   LexiconUnavailable,
   ResultRange,
 } from "@/components/public/LexiconBits";
-import { EmptyState, IdChip, Pagination } from "@/components/ui";
+import { DefinitionList, EmptyState, IdChip, Pagination } from "@/components/ui";
 import type { WordSearchResult } from "@/lib/lexicon-api";
 import type { POS } from "@/lib/types";
 
@@ -167,11 +167,12 @@ export function WordSearchView({
                         {t("showDetails")}
                       </WordLink>
                     </div>
-                    {hit.definition ? (
-                      <p className="font-bengali mt-1.5 line-clamp-2 text-sm text-slate-600">
-                        {hit.definition}
-                      </p>
-                    ) : null}
+                    <DefinitionList
+                      definitions={hit.definitions}
+                      emptyLabel={t("noDefinitionYet")}
+                      clamp
+                      className="mt-1.5"
+                    />
                   </li>
                 );
               })}

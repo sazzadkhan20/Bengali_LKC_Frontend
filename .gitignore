@@ -40,6 +40,3 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Raw WordNet 2.1 source package (regenerate the index with
-# `npm run build:wordnet21` — keep only data/wordnet21-ili.json committed)
-/data/wordnet21-src/

@@ -119,9 +119,8 @@ host.
   live statistics over the XML baseline plus validated crowdsourced entries).
 - `src/lib/dashboard.ts` / `src/lib/community.ts` / `src/lib/arbitration.ts`
   — view-model types for the role dashboards, Community Board and arbitration.
-- `src/lib/wordnet21.ts` + `data/wordnet21-ili.json` — Princeton WordNet 2.1
-  ILI registry (~118k synsets). Rebuild with `npm run build:wordnet21` after
-  extracting the official `WordNet-2.1.tar.gz` into `data/wordnet21-src/`.
+- The Princeton WordNet 3.0 ILI registry lives in the backend
+  (`GET /api/lookup/ili`); the frontend only proxies it.
 - `src/app/api/**` — BFF endpoints for auth (login, change-password,
   forgot-password), submissions, review actions, arbitration, community,
   lookups (including `/api/lookup/ili`), lexicon typeahead, contribute
@@ -146,7 +145,7 @@ host.
 /synset/[id]             Synset detail + hypernym path + graph (authenticated)
 /dashboard               Role-specific dashboard (6 variants)
 /dashboard/quick-input   Quick Input form (inline ILI Finder when creating a synset)
-/dashboard/ili-finder    Standalone WordNet 2.1 ILI lookup (English word + POS)
+/dashboard/ili-finder    Standalone WordNet 3.0 ILI lookup (English word + POS)
 /dashboard/submissions   My submissions (+ /[id] detail & actions)
 /dashboard/queue         Review queues / queue management
 /dashboard/arbitration   Case list (+ /[id] side-by-side voting view)

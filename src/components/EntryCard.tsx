@@ -7,7 +7,7 @@ import { useI18n } from "@/lib/i18n";
 import { WordLink } from "@/components/WordLink";
 import { LocalizedPosBadge } from "@/components/LocalizedPosBadge";
 import { CrowdsourcedBadge, ValidatedNote } from "@/components/public/LexiconBits";
-import { IdChip, LangBadge } from "./ui";
+import { DefinitionList, IdChip } from "./ui";
 
 const CARD =
   "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md sm:p-5";
@@ -42,13 +42,12 @@ export function EntryCard({
           {t("showDetails")}
         </span>
       </header>
-      {entry.definition ? (
-        <p className="font-bengali mt-3 line-clamp-2 text-sm leading-relaxed text-slate-600">
-          {entry.definition}
-        </p>
-      ) : (
-        <p className="mt-3 text-xs italic text-slate-400">{t("noDefinitionYet")}</p>
-      )}
+      <DefinitionList
+        definitions={entry.definitions}
+        emptyLabel={t("noDefinitionYet")}
+        clamp
+        className="mt-3"
+      />
     </WordLink>
   );
 }
@@ -115,13 +114,11 @@ export function WordEntryDetail({
               ) : null}
             </div>
 
-            {sense.definition ? (
-              <p className="font-bengali mt-2 text-sm leading-relaxed text-slate-700">
-                <LangBadge lang={sense.definition.language} /> {sense.definition.text}
-              </p>
-            ) : (
-              <p className="mt-2 text-xs italic text-slate-400">{t("noDefinitionYet")}</p>
-            )}
+            <DefinitionList
+              definitions={sense.definitions}
+              emptyLabel={t("noDefinitionYet")}
+              className="mt-2"
+            />
 
             {sense.synonyms.length > 0 ? (
               <p className="mt-2 text-xs text-slate-500">

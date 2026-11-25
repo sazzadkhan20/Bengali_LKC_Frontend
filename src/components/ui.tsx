@@ -41,10 +41,80 @@ export function IdChip({ id }: { id: string }) {
 }
 
 export function LangBadge({ lang }: { lang: string }) {
+  const code = (lang || "").toLowerCase();
+  const style =
+    code === "eng"
+      ? "bg-sky-50 text-sky-700 ring-sky-200"
+      : code === "ben"
+        ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+        : "bg-slate-100 text-slate-500 ring-slate-200";
   return (
-    <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500 ring-1 ring-inset ring-slate-200">
-      {lang}
+    <span
+      className={`inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ring-1 ring-inset ${style}`}
+    >
+      {code || lang}
     </span>
+  );
+}
+
+/** One synset definition (language code `ben` / `eng`). */
+export type DefinitionItem = { language: string; text: string };
+
+const LANG_ORDER: Record<string, number> = { ben: 0, eng: 1 };
+
+/** Bengali first, then English. */
+export function sortDefinitions<T extends DefinitionItem>(defs: readonly T[] | null | undefined): T[] {
+  return [...(defs ?? [])].sort(
+    (a, b) => (LANG_ORDER[a.language] ?? 9) - (LANG_ORDER[b.language] ?? 9)
+  );
+}
+
+/**
+ * All definitions of a synset, one below another, each with its BEN / ENG badge;
+ * "No definition" when the synset has none.
+ */
+export function DefinitionList({
+  definitions,
+  emptyLabel = "No definition",
+  size = "sm",
+  clamp = false,
+  className = "",
+}: {
+  definitions: readonly DefinitionItem[] | null | undefined;
+  emptyLabel?: ReactNode;
+  size?: "xs" | "sm" | "lg";
+  /** Clamp each definition to two lines (compact cards). */
+  clamp?: boolean;
+  className?: string;
+}) {
+  const items = sortDefinitions(definitions).filter((d) => d.text && d.text.trim());
+  if (items.length === 0) {
+    return <p className={`text-xs italic text-slate-400 ${className}`}>{emptyLabel}</p>;
+  }
+  const text =
+    size === "lg"
+      ? "text-lg leading-relaxed text-slate-800"
+      : size === "xs"
+        ? "text-xs leading-relaxed text-slate-500"
+        : "text-sm leading-relaxed text-slate-700";
+  return (
+    <ul className={`space-y-1.5 ${className}`}>
+      {items.map((d) => (
+        <li key={d.language} className="flex items-start gap-2">
+          <span className={size === "lg" ? "pt-1.5" : "pt-0.5"}>
+            <LangBadge lang={d.language} />
+          </span>
+          <span
+            lang={d.language === "eng" ? "en" : "bn"}
+            className={`min-w-0 break-words ${d.language === "eng" ? "" : "font-bengali"} ${text} ${
+              clamp ? "line-clamp-2" : ""
+            }`}
+          >
+            {d.text}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

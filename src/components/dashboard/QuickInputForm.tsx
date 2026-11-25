@@ -8,7 +8,7 @@ import Link from "next/link";
 import { POS_LABEL, STATE_LABEL } from "@/lib/format";
 import type { EntryState, POS, Role } from "@/lib/types";
 import { IliFinder } from "@/components/dashboard/IliFinder";
-import { StateBadge } from "@/components/ui";
+import { LangBadge, sortDefinitions, StateBadge, type DefinitionItem } from "@/components/ui";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 
 /* ------------------------------------------------------------------ */
@@ -19,7 +19,10 @@ interface SynsetHit {
   id: string;
   ili: string;
   pos: string;
+  /** Primary definition preview. */
   definition?: string;
+  /** Every definition of the synset (at most one per language). */
+  definitions?: DefinitionItem[];
   words: string[];
   origin?: string;
 }
@@ -269,6 +272,21 @@ const WORD_MAX = 25;
 const DEFINITION_MIN = 5;
 const DEFINITION_MAX = 500;
 const NOTE_MAX = 500;
+
+/** Supported definition languages, in display order; a synset has at most one definition per language. */
+const DEF_LANGS = ["ben", "eng"] as const;
+type DefLang = (typeof DEF_LANGS)[number];
+const DEF_LANG_LABEL: Record<DefLang, string> = { ben: "Bengali (ben)", eng: "English (eng)" };
+const DEF_LANG_NAME: Record<string, string> = { ben: "Bengali", eng: "English" };
+
+/** One definition being written in the form; rows with empty text are not sent. */
+interface DefRow {
+  key: number;
+  language: DefLang;
+  text: string;
+}
+
+const isDefLang = (v: string): v is DefLang => (DEF_LANGS as readonly string[]).includes(v);
 const RELATIONS_MAX = 20;
 
 const BENGALI_RE = /[\u0980-\u09ff]/;
@@ -294,9 +312,10 @@ const quickInputSchema = z
     synsetId: z.string().optional(),
     synsetPos: z.string().optional(),
     iliCode: z.string().optional(),
-    definitionLocked: z.boolean(),
-    definitionLanguage: z.enum(["ben", "eng"], { message: "Select the definition language." }),
-    definitionText: z.string(),
+    /** Definitions to send (non-empty rows), in form order — keys line up with the server's "definitions.N". */
+    definitions: z.array(z.object({ language: z.string(), text: z.string() })),
+    /** Languages the linked synset already has a definition in. */
+    existingLanguages: z.array(z.string()),
     reviewerNote: z
       .string()
       .refine((v) => codePoints(v.trim()) <= NOTE_MAX, `Note must be at most ${NOTE_MAX} characters.`),
@@ -344,18 +363,34 @@ const quickInputSchema = z
         );
     }
 
-    const def = v.definitionText.trim();
-    if (!v.definitionLocked && def) {
+    const firstLang = new Map<string, number>();
+    v.definitions.forEach((d, i) => {
+      const def = d.text.trim();
+      const name = DEF_LANG_NAME[d.language] ?? d.language;
       const len = codePoints(def);
-      if (len < DEFINITION_MIN)
-        add(["definitionText"], `Definition must be at least ${DEFINITION_MIN} characters.`);
-      else if (len > DEFINITION_MAX)
-        add(["definitionText"], `Definition must be at most ${DEFINITION_MAX} characters.`);
-      else if (v.definitionLanguage === "ben" && (!BENGALI_RE.test(def) || LATIN_RE.test(def)))
-        add(["definitionText"], "A Bengali definition must be written in Bengali script.");
-      else if (v.definitionLanguage === "eng" && (!LATIN_RE.test(def) || BENGALI_RE.test(def)))
-        add(["definitionText"], "An English definition must be written in English (Latin script).");
-    }
+      if (!isDefLang(d.language)) add(["definitions", i], "Select the definition language.");
+      else if (v.synsetAction === "link" && v.existingLanguages.includes(d.language))
+        add(
+          ["definitions", i],
+          `The selected synset already has a ${name} definition. Add a definition in another language, or remove this one.`
+        );
+      else if (firstLang.has(d.language))
+        add(
+          ["definitions", i],
+          `Only one definition per language: ${name} is already used in definition ${firstLang.get(d.language)! + 1}.`
+        );
+      else {
+        firstLang.set(d.language, i);
+        if (len < DEFINITION_MIN)
+          add(["definitions", i], `Definition must be at least ${DEFINITION_MIN} characters.`);
+        else if (len > DEFINITION_MAX)
+          add(["definitions", i], `Definition must be at most ${DEFINITION_MAX} characters.`);
+        else if (d.language === "ben" && (!BENGALI_RE.test(def) || LATIN_RE.test(def)))
+          add(["definitions", i], "A Bengali definition must be written in Bengali script.");
+        else if (d.language === "eng" && (!LATIN_RE.test(def) || BENGALI_RE.test(def)))
+          add(["definitions", i], "An English definition must be written in English (Latin script).");
+      }
+    });
 
     const firstSense = new Map<string, number>();
     v.senseRelations.forEach((r, i) => {
@@ -395,8 +430,7 @@ const FIELD_LABEL: Record<string, string> = {
   synsetAction: "Concept linkage",
   synsetId: "Synset",
   iliCode: "ILI code",
-  definitionLanguage: "Definition language",
-  definitionText: "Definition",
+  definitions: "Definitions",
   reviewerNote: "Notes",
   senseRelations: "Sense relations",
   synsetRelations: "Synset relations",
@@ -406,6 +440,7 @@ const FIELD_LABEL: Record<string, string> = {
 function fieldLabel(key: string): string {
   const [root, row] = key.split(".");
   if (row !== undefined) {
+    if (root === "definitions") return `Definition ${Number(row) + 1}`;
     return `${root === "senseRelations" ? "Sense relation" : "Synset relation"} row ${Number(row) + 1}`;
   }
   return FIELD_LABEL[root] ?? "Entry";
@@ -416,8 +451,7 @@ const TOUCH_GATED = new Set([
   "writtenForm",
   "synsetId",
   "iliCode",
-  "definitionText",
-  "definitionLanguage",
+  "definitions",
   "reviewerNote",
 ]);
 
@@ -456,8 +490,8 @@ export interface ResubmissionSource {
   synsetAction: "link" | "create";
   synset: SynsetHit | null;
   iliCode: string | null;
-  definitionLanguage: "ben" | "eng";
-  definitionText: string;
+  /** The entry's own definitions (for a linked synset: the ones it adds). */
+  definitions: DefinitionItem[];
   reviewerNote: string;
   senseRelations: RelRow[];
   synsetRelations: RelRow[];
@@ -474,10 +508,13 @@ export function QuickInputForm({
   role,
   resubmission,
   captchaConfig = CHECKBOX_CAPTCHA,
+  prefill,
 }: {
   role: Role;
   resubmission?: ResubmissionSource;
   captchaConfig?: CaptchaClientConfig;
+  /** New entry started from the ILI Finder: “Create new synset” with this ILI code already picked. */
+  prefill?: { ili: string; pos: string };
 }) {
   const router = useRouter();
   const [mountedAt] = useState(() => Date.now());
@@ -487,15 +524,31 @@ export function QuickInputForm({
   const src = resubmission;
   const tie = src?.tie;
 
+  const start = src ? null : prefill;
   const [word, setWord] = useState(src?.writtenForm ?? "");
-  const [pos, setPos] = useState(src?.pos ?? "n");
-  const [synsetAction, setSynsetAction] = useState<"link" | "create">(src?.synsetAction ?? "link");
+  const [pos, setPos] = useState(src?.pos ?? start?.pos ?? "n");
+  const [synsetAction, setSynsetAction] = useState<"link" | "create">(
+    src?.synsetAction ?? (start ? "create" : "link")
+  );
   const [selectedSynset, setSelectedSynset] = useState<SynsetHit | null>(src?.synset ?? null);
-  const [ili, setIli] = useState(normalizeIliCode(src?.iliCode));
+  const [ili, setIli] = useState(normalizeIliCode(src?.iliCode ?? start?.ili));
   /** After “Use this code”, the finder is hidden until Discard. */
-  const [iliPicked, setIliPicked] = useState(Boolean(src?.iliCode));
-  const [defLang, setDefLang] = useState<"ben" | "eng">(src?.definitionLanguage ?? "ben");
-  const [defText, setDefText] = useState(src?.definitionText ?? "");
+  const [iliPicked, setIliPicked] = useState(Boolean(src?.iliCode ?? start?.ili));
+  const defKeyRef = useRef(0);
+  const newDefRow = useCallback((language: DefLang, text = ""): DefRow => {
+    defKeyRef.current += 1;
+    return { key: defKeyRef.current, language, text };
+  }, []);
+  /** Definitions written in the form. A new synset starts with one (optional) row. */
+  const [defs, setDefs] = useState<DefRow[]>(() => {
+    const own = sortDefinitions(src?.definitions ?? []).filter((d) => isDefLang(d.language));
+    if (own.length > 0) {
+      return own.map((d, i) => ({ key: -(i + 1), language: d.language as DefLang, text: d.text }));
+    }
+    return (src?.synsetAction ?? (start ? "create" : "link")) === "create"
+      ? [{ key: -1, language: "ben", text: "" }]
+      : [];
+  });
   const [senseRels, setSenseRels] = useState<RelRow[]>(src?.senseRelations ?? []);
   const [synsetRels, setSynsetRels] = useState<RelRow[]>(src?.synsetRelations ?? []);
   const [note, setNote] = useState(src?.reviewerNote ?? "");
@@ -539,8 +592,30 @@ export function QuickInputForm({
   }
   const CAPTCHA_LOAD_ERROR =
     "Verification could not load. Check your connection or allow google.com/recaptcha in your content blocker, then try again.";
-  const lockedDefinition =
-    synsetAction === "link" && selectedSynset?.definition ? true : false;
+  /** Definitions the linked synset already has — shown locked, and their languages cannot be added again. */
+  const existingDefs = useMemo(
+    () => (synsetAction === "link" ? sortDefinitions(selectedSynset?.definitions ?? []) : []),
+    [synsetAction, selectedSynset]
+  );
+  const existingLanguages = useMemo(() => existingDefs.map((d) => d.language), [existingDefs]);
+  /** Rows actually sent (non-empty text), in form order. */
+  const sentDefs = useMemo(
+    () => defs.filter((d) => d.text.trim() !== "").map((d) => ({ language: d.language, text: d.text.trim() })),
+    [defs]
+  );
+  /** Row key → index in the sent list (where its errors are keyed). */
+  const sentIndexByKey = useMemo(() => {
+    const m = new Map<number, number>();
+    let i = 0;
+    for (const d of defs) if (d.text.trim() !== "") m.set(d.key, i++);
+    return m;
+  }, [defs]);
+  const freeLanguages = (exceptKey: number | null) =>
+    DEF_LANGS.filter(
+      (l) => !existingLanguages.includes(l) && !defs.some((d) => d.key !== exceptKey && d.language === l)
+    );
+  const canAddDefinition =
+    (synsetAction === "create" || Boolean(selectedSynset)) && freeLanguages(null).length > 0;
   const iliNa = isIliNotAvailable(ili);
 
   const touch = useCallback((...keys: string[]) => {
@@ -561,8 +636,12 @@ export function QuickInputForm({
         .map((r) => `${r.relType}|${r.target}`)
         .sort()
         .join(",");
-    const definition = lockedDefinition ? "" : defText.trim();
-    const initialDefinition = src.definitionText.trim();
+    const defKey = (rows: { language: string; text: string }[]) =>
+      rows
+        .filter((d) => d.text.trim())
+        .map((d) => `${d.language}|${d.text.trim()}`)
+        .sort()
+        .join("\n");
     return (
       cleanWord(word) !== cleanWord(src.writtenForm) ||
       pos !== src.pos ||
@@ -570,13 +649,12 @@ export function QuickInputForm({
       (synsetAction === "link" && (selectedSynset?.id ?? "") !== (src.synset?.id ?? "")) ||
       (synsetAction === "create" &&
         normalizeIliCode(ili).toLowerCase() !== normalizeIliCode(src.iliCode).toLowerCase()) ||
-      definition !== initialDefinition ||
-      (definition !== "" && defLang !== src.definitionLanguage) ||
+      defKey(sentDefs) !== defKey(src.definitions) ||
       relKey(senseRels) !== relKey(src.senseRelations) ||
       relKey(synsetRels) !== relKey(src.synsetRelations) ||
       note.trim() !== src.reviewerNote.trim()
     );
-  }, [src, word, pos, synsetAction, selectedSynset, ili, defText, defLang, lockedDefinition, senseRels, synsetRels, note]);
+  }, [src, word, pos, synsetAction, selectedSynset, ili, sentDefs, senseRels, synsetRels, note]);
 
   /** Exactly what is sent to the server — every relation row included, so row errors line up by index. */
   const entry = useMemo(
@@ -591,13 +669,12 @@ export function QuickInputForm({
             ? ILI_NOT_AVAILABLE
             : ili.trim().toLowerCase()
           : undefined,
-      definitionLanguage: defLang,
-      definitionText: lockedDefinition ? undefined : defText.trim() || undefined,
+      definitions: sentDefs,
       senseRelations: senseRels.map((r) => ({ relType: r.relType, target: r.target })),
       synsetRelations: synsetRels.map((r) => ({ relType: r.relType, target: r.target })),
       reviewerNote: isModerator ? undefined : note.trim() || undefined,
     }),
-    [word, pos, synsetAction, selectedSynset, ili, iliNa, defLang, defText, lockedDefinition, senseRels, synsetRels, note, isModerator]
+    [word, pos, synsetAction, selectedSynset, ili, iliNa, sentDefs, senseRels, synsetRels, note, isModerator]
   );
   const entryKey = useMemo(() => JSON.stringify(entry), [entry]);
 
@@ -610,9 +687,8 @@ export function QuickInputForm({
       synsetId: selectedSynset?.id,
       synsetPos: selectedSynset?.pos,
       iliCode: ili,
-      definitionLocked: lockedDefinition,
-      definitionLanguage: defLang,
-      definitionText: defText,
+      definitions: sentDefs,
+      existingLanguages,
       reviewerNote: note,
       senseRelations: senseRels,
       synsetRelations: synsetRels,
@@ -625,7 +701,7 @@ export function QuickInputForm({
       }
     }
     return out;
-  }, [word, pos, synsetAction, selectedSynset, ili, lockedDefinition, defLang, defText, note, senseRels, synsetRels]);
+  }, [word, pos, synsetAction, selectedSynset, ili, sentDefs, existingLanguages, note, senseRels, synsetRels]);
 
   const wordReady = !clientErrors.writtenForm;
   const debouncedKey = useDebounced(entryKey, 400);
@@ -821,7 +897,7 @@ export function QuickInputForm({
       setSelectedSynset(null);
       setIli("");
       setIliPicked(false);
-      setDefText("");
+      setDefs(synsetAction === "create" ? [newDefRow("ben")] : []);
       setSenseRels([]);
       setSynsetRels([]);
       setNote("");
@@ -1096,6 +1172,21 @@ export function QuickInputForm({
                 ? "New synset · ILI N/A"
                 : `New synset · ILI ${ili.trim().toLowerCase()}`}
           </dd>
+          <dt className="text-slate-400">Definitions</dt>
+          <dd className="col-span-2 space-y-1 text-xs text-slate-700">
+            {sentDefs.length === 0 ? (
+              <span className="italic text-slate-400">
+                {existingDefs.length > 0 ? "No new definition (synset definitions kept)" : "No definition"}
+              </span>
+            ) : (
+              sentDefs.map((d) => (
+                <p key={d.language} className="flex items-start gap-1.5">
+                  <LangBadge lang={d.language} />
+                  <span className={`line-clamp-2 ${d.language === "eng" ? "" : "font-bengali"}`}>{d.text}</span>
+                </p>
+              ))
+            )}
+          </dd>
           {nearConfirmed ? (
             <>
               <dt className="text-slate-400">Polysemy</dt>
@@ -1348,6 +1439,9 @@ export function QuickInputForm({
                   if (val === "link") {
                     setIli("");
                     setIliPicked(false);
+                    setDefs((rows) => rows.filter((d) => d.text.trim() !== ""));
+                  } else {
+                    setDefs((rows) => (rows.length === 0 ? [newDefRow("ben")] : rows));
                   }
                 }}
                 className="h-4 w-4 accent-emerald-700"
@@ -1429,7 +1523,7 @@ export function QuickInputForm({
                     N/A — ILI not available
                   </span>
                   <span className="mt-0.5 block text-xs text-slate-500">
-                    Select when no Princeton WordNet 2.1 concept applies yet.
+                    Select when no Princeton WordNet 3.0 concept applies yet.
                     Editors can attach an ILI later if one is found.
                   </span>
                 </span>
@@ -1517,63 +1611,151 @@ export function QuickInputForm({
         {fieldError("synsetAction")}
       </fieldset>
 
-      {/* Definition */}
-      <div className="grid gap-5 sm:grid-cols-[10rem_1fr]">
-        <div>
-          <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-            Definition language
-          </label>
-          <select
-            value={defLang}
-            onChange={(e) => {
-              setDefLang(e.target.value as "ben" | "eng");
-              touch("definitionLanguage");
-            }}
-            disabled={lockedDefinition}
-            className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none transition focus:ring-2 disabled:bg-slate-100 ${inputBorder("definitionLanguage")}`}
-          >
-            <option value="ben">Bengali (ben)</option>
-            <option value="eng">English (eng)</option>
-          </select>
-          {fieldError("definitionLanguage")}
-        </div>
-        <div>
-          <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-            Definition text{" "}
-            <span className="font-normal text-slate-400">
-              (optional · {DEFINITION_MIN}–{DEFINITION_MAX} characters · in the selected language)
-            </span>
-          </label>
-          {lockedDefinition ? (
-            <div className="font-bengali rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm text-slate-600">
-              🔒 {selectedSynset?.definition}
-              <span className="mt-1 block text-[11px] text-slate-400">
-                The selected synset already has a definition — field locked.
-              </span>
-            </div>
+      {/* Definitions */}
+      <fieldset
+        className={`rounded-2xl border p-5 ${
+          Object.keys(allErrors).some((k) => k.startsWith("definitions")) ? "border-red-200" : "border-slate-200"
+        }`}
+      >
+        <legend className="px-2 text-sm font-bold text-slate-700">
+          Definitions{" "}
+          <span className="font-normal text-slate-400">
+            (optional · one per language · {DEFINITION_MIN}–{DEFINITION_MAX} characters each)
+          </span>
+        </legend>
+
+        {synsetAction === "link" ? (
+          selectedSynset ? (
+            existingDefs.length > 0 ? (
+              <ul className="mb-3 space-y-2">
+                {existingDefs.map((d) => (
+                  <li
+                    key={d.language}
+                    className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm text-slate-600"
+                  >
+                    <span aria-hidden="true">🔒</span>
+                    <LangBadge lang={d.language} />
+                    <span lang={d.language === "eng" ? "en" : "bn"} className={`min-w-0 break-words ${d.language === "eng" ? "" : "font-bengali"}`}>
+                      {d.text}
+                    </span>
+                  </li>
+                ))}
+                <li className="text-[11px] text-slate-400">
+                  Existing definitions of {selectedSynset.id} are locked.
+                  {canAddDefinition ? " You can add a definition in a language it does not have yet." : " It already has a definition in every supported language."}
+                </li>
+              </ul>
+            ) : (
+              <p className="mb-3 text-xs text-slate-500">
+                {selectedSynset.id} has no definition yet. You can add one in each language.
+              </p>
+            )
           ) : (
-            <textarea
-              value={defText}
-              onChange={(e) => {
-                setDefText(e.target.value);
-                touch("definitionText");
-              }}
-              maxLength={DEFINITION_MAX + 50}
-              rows={3}
-              lang={defLang === "eng" ? "en" : "bn"}
-              placeholder={defLang === "eng" ? "Write the definition in English…" : "ধারণাটির সংজ্ঞা লিখুন…"}
-              aria-invalid={Boolean(shownError("definitionText")) || undefined}
-              className={`font-bengali w-full rounded-xl border px-3 py-2.5 text-sm outline-none transition focus:ring-2 ${inputBorder("definitionText")}`}
-            />
-          )}
-          {!lockedDefinition && defText.trim() ? (
-            <p className="mt-1 text-right text-[11px] text-slate-400">
-              {codePoints(defText.trim())}/{DEFINITION_MAX}
-            </p>
-          ) : null}
-          {fieldError("definitionText")}
+            <p className="mb-3 text-xs text-slate-400">Select a synset to see its definitions.</p>
+          )
+        ) : null}
+
+        <div className="space-y-3">
+          {defs.map((row, i) => {
+            const sentIndex = sentIndexByKey.get(row.key);
+            const rowError = sentIndex !== undefined ? shownError(`definitions.${sentIndex}`) : null;
+            const options = Array.from(new Set<DefLang>([row.language, ...freeLanguages(row.key)])).sort(
+              (a, b) => DEF_LANGS.indexOf(a) - DEF_LANGS.indexOf(b)
+            );
+            return (
+              <div key={row.key} className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <label className="text-xs font-semibold text-slate-600" htmlFor={`def-lang-${row.key}`}>
+                    Definition {i + 1} language
+                  </label>
+                  <select
+                    id={`def-lang-${row.key}`}
+                    value={row.language}
+                    onChange={(e) => {
+                      const language = e.target.value as DefLang;
+                      setDefs((rows) => rows.map((d) => (d.key === row.key ? { ...d, language } : d)));
+                      touch("definitions");
+                    }}
+                    className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                  >
+                    {options.map((l) => (
+                      <option key={l} value={l}>
+                        {DEF_LANG_LABEL[l]}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDefs((rows) => rows.filter((d) => d.key !== row.key));
+                      touch("definitions");
+                    }}
+                    className="ml-auto rounded-lg px-2 py-1 text-xs font-bold text-red-600 ring-1 ring-inset ring-red-200 transition hover:bg-red-50"
+                    aria-label={`Remove definition ${i + 1}`}
+                  >
+                    ✕ Remove
+                  </button>
+                </div>
+                <textarea
+                  value={row.text}
+                  onChange={(e) => {
+                    const text = e.target.value;
+                    setDefs((rows) => rows.map((d) => (d.key === row.key ? { ...d, text } : d)));
+                    touch("definitions");
+                  }}
+                  maxLength={DEFINITION_MAX + 50}
+                  rows={3}
+                  lang={row.language === "eng" ? "en" : "bn"}
+                  placeholder={
+                    row.language === "eng" ? "Write the definition in English…" : "ধারণাটির সংজ্ঞা বাংলায় লিখুন…"
+                  }
+                  aria-invalid={Boolean(rowError) || undefined}
+                  className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none transition focus:ring-2 ${
+                    row.language === "eng" ? "" : "font-bengali"
+                  } ${
+                    rowError
+                      ? "border-red-400 bg-red-50/40 focus:border-red-500 focus:ring-red-200"
+                      : "border-slate-300 focus:border-emerald-500 focus:ring-emerald-200"
+                  }`}
+                />
+                <div className="mt-1 flex items-start justify-between gap-3">
+                  {rowError ? (
+                    <p role="alert" className="flex items-start gap-1 text-xs font-medium text-red-600">
+                      <span aria-hidden="true">⚠</span>
+                      <span>{rowError}</span>
+                    </p>
+                  ) : (
+                    <span className="text-[11px] text-slate-400">
+                      {row.text.trim() ? "" : "Optional — leave empty to skip this definition."}
+                    </span>
+                  )}
+                  {row.text.trim() ? (
+                    <span className="shrink-0 text-[11px] text-slate-400">
+                      {codePoints(row.text.trim())}/{DEFINITION_MAX}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
         </div>
-      </div>
+
+        {canAddDefinition ? (
+          <button
+            type="button"
+            onClick={() => {
+              const [language] = freeLanguages(null);
+              if (!language) return;
+              setDefs((rows) => [...rows, newDefRow(language)]);
+              touch("definitions");
+            }}
+            className="mt-3 rounded-lg border border-dashed border-emerald-300 px-3 py-1.5 text-xs font-bold text-emerald-700 transition hover:bg-emerald-50"
+          >
+            + Add definition
+          </button>
+        ) : null}
+        {fieldError("definitions")}
+      </fieldset>
 
       {/* Relations */}
       <div className="grid gap-5 lg:grid-cols-2">

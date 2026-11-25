@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
 import { SearchBox } from "@/components/public/SearchBox";
 import { LocalizedPosBadge } from "@/components/LocalizedPosBadge";
-import { EmptyState, IdChip, LangBadge } from "@/components/ui";
+import { DefinitionList, EmptyState, IdChip, type DefinitionItem } from "@/components/ui";
 import { CrowdsourcedBadge, LexiconUnavailable } from "@/components/public/LexiconBits";
 import type { POS } from "@/lib/types";
 
@@ -16,8 +16,7 @@ export type SenseHitView = {
   synsetId: string;
   ili: string | null;
   synsetPos: POS | null;
-  defLang: string | null;
-  defText: string | null;
+  definitions: DefinitionItem[];
   crowdsourced: boolean;
   validatedAt: string | null;
   relations: {
@@ -86,12 +85,11 @@ export function SenseSearchView({
                   <LocalizedPosBadge pos={hit.synsetPos} />
                 ) : null}
               </div>
-              {hit.defText ? (
-                <p className="font-bengali mt-2 text-sm text-slate-700">
-                  {hit.defLang ? <LangBadge lang={hit.defLang} /> : null}{" "}
-                  {hit.defText}
-                </p>
-              ) : null}
+              <DefinitionList
+                definitions={hit.definitions}
+                emptyLabel={t("noDefinitionYet")}
+                className="mt-2"
+              />
             </div>
           ) : null}
 

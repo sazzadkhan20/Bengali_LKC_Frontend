@@ -14,12 +14,6 @@ const nextConfig: NextConfig = {
     root: projectRoot,
   },
   outputFileTracingRoot: projectRoot,
-  // Ensure the WordNet 2.1 ILI registry travels with the standalone output
-  outputFileTracingIncludes: {
-    "/api/lookup/ili": ["./data/wordnet21-ili.json"],
-    "/dashboard/ili-finder": ["./data/wordnet21-ili.json"],
-    "/api/submissions": ["./data/wordnet21-ili.json"],
-  },
 };
 
 export default nextConfig;

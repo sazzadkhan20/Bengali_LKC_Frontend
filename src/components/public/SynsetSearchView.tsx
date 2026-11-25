@@ -10,7 +10,7 @@ import {
   LexiconUnavailable,
   ResultRange,
 } from "@/components/public/LexiconBits";
-import { EmptyState, IdChip, LangBadge, Pagination } from "@/components/ui";
+import { DefinitionList, EmptyState, IdChip, Pagination } from "@/components/ui";
 import type { SynsetSearchResult } from "@/lib/lexicon-api";
 
 export function SynsetSearchView({
@@ -91,11 +91,11 @@ export function SynsetSearchView({
                     {t("openSynset")}
                   </Link>
                 </div>
-                {hit.defText ? (
-                  <p className="font-bengali mt-2 text-sm text-slate-700">
-                    {hit.defLang ? <LangBadge lang={hit.defLang} /> : null} {hit.defText}
-                  </p>
-                ) : null}
+                <DefinitionList
+                  definitions={hit.definitions}
+                  emptyLabel={t("noDefinitionYet")}
+                  className="mt-2"
+                />
                 <p className="mt-2 text-xs text-slate-500">
                   <span className="font-semibold">
                     {t("bengaliWords")} ({hit.entryCount}):

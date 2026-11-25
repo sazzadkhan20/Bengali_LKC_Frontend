@@ -15,6 +15,9 @@ export type LexiconResult<T> =
 
 export type WordRef = { id: string; lemma: string; crowdsourced: boolean };
 
+/** One synset definition; a synset has at most one per language. */
+export type Definition = { language: string; text: string };
+
 export type EntryCardData = {
   id: string;
   lemma: string;
@@ -25,8 +28,11 @@ export type EntryCardData = {
   crowdsourced: boolean;
   validatedAt: string | null;
   synsetId: string | null;
+  /** Primary definition preview (Bengali first). */
   definition: string | null;
   defLang: string | null;
+  /** Every definition of the entry's first sense, Bengali first. */
+  definitions: Definition[];
 };
 
 export type PageInfo = { page: number; size: number; total: number; totalPages: number };
@@ -66,6 +72,7 @@ export type SynsetHitData = {
   lexicalized: boolean;
   defLang: string | null;
   defText: string | null;
+  definitions: Definition[];
   crowdsourced: boolean;
   entries: WordRef[];
   entryCount: number;
@@ -91,6 +98,7 @@ export type SenseDetail = {
   synsetPos: POS | null;
   defLang: string | null;
   defText: string | null;
+  definitions: Definition[];
   crowdsourced: boolean;
   validatedAt: string | null;
   relations: SenseRelationRef[];
@@ -113,6 +121,7 @@ export type WordSense = {
   synsetPos: POS;
   lexicalized: boolean;
   definition: { language: string; text: string } | null;
+  definitions: Definition[];
   crowdsourced: boolean;
   newSynset: boolean;
   submissionId: string | null;
@@ -143,6 +152,7 @@ export type SynsetDetail = {
   pos: POS;
   lexicalized: boolean;
   definition: { language: string; text: string } | null;
+  definitions: Definition[];
   crowdsourced: boolean;
   submissionId: string | null;
   validatedAt: string | null;

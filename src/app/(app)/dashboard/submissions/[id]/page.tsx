@@ -8,11 +8,14 @@ import { formatDateTime, REL_LABEL, ROLE_LABEL, STATE_LABEL, timeAgo } from "@/l
 import {
   Card,
   CardHeader,
+  DefinitionList,
   IdChip,
   LangBadge,
   PageTitle,
   PosBadge,
+  sortDefinitions,
   StateBadge,
+  type DefinitionItem,
 } from "@/components/ui";
 import {
   ReviewActions,
@@ -51,6 +54,8 @@ type HistoryStep = Submission["history"][number] & {
 
 type SubmissionDetail = Omit<Submission, "history"> & {
   history: HistoryStep[];
+  /** The entry's own definitions (for a linked synset: the ones it adds). */
+  definitions?: DefinitionItem[];
   lastUpdatedBy?: string | null;
   currentStateSince?: string | null;
   submittedForReviewAt?: string | null;
@@ -61,6 +66,7 @@ type SubmissionDetail = Omit<Submission, "history"> & {
     pos: POS | null;
     definitionText: string | null;
     definitionLanguage: string | null;
+    definitions?: DefinitionItem[];
     members: string[];
   };
   iliInfo?: { ili: string; pos: POS | null; words: string | null; gloss: string | null };
@@ -266,10 +272,22 @@ export default async function SubmissionDetailPage({
     session.role !== "LEXICAL_EDITOR" && session.role !== "CHIEF_LEXICAL_EDITOR";
   const history = [...sub.history].reverse();
   const iliWords = sub.iliInfo?.words?.trim() || null;
+  const ownDefinitions = sortDefinitions(
+    sub.definitions ??
+      (sub.definitionText ? [{ language: sub.definitionLanguage ?? "ben", text: sub.definitionText }] : [])
+  );
+  const synsetDefinitions = sortDefinitions(
+    synset?.definitions ??
+      (synset?.definitionText ? [{ language: synset.definitionLanguage ?? "ben", text: synset.definitionText }] : [])
+  );
+  /** Everything the reviewer must check: the linked synset's definitions plus the ones this entry adds. */
+  const allDefinitions = sortDefinitions([
+    ...(sub.synsetAction === "link" ? synsetDefinitions.map((d) => ({ ...d, fromSynset: true })) : []),
+    ...ownDefinitions.map((d) => ({ ...d, fromSynset: false })),
+  ]);
+  const iliGlossText = sub.iliInfo?.gloss?.trim() ?? "";
   const iliGloss =
-    sub.iliInfo?.gloss?.trim() && sub.iliInfo.gloss.trim() !== synset?.definitionText?.trim()
-      ? sub.iliInfo.gloss.trim()
-      : null;
+    iliGlossText && !synsetDefinitions.some((d) => d.text.trim() === iliGlossText) ? iliGlossText : null;
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -388,18 +406,36 @@ export default async function SubmissionDetailPage({
               <Row label="Part of speech">
                 <PosBadge pos={sub.pos} />
               </Row>
-              <Row label="Definition">
-                {sub.definitionText ? (
-                  <span className="font-bengali">
-                    <LangBadge lang={sub.definitionLanguage ?? "ben"} /> {sub.definitionText}
-                  </span>
-                ) : synset?.definitionText ? (
-                  <span className="font-bengali text-slate-600">
-                    <LangBadge lang={synset.definitionLanguage ?? "ben"} /> {synset.definitionText}{" "}
-                    <em className="text-xs text-slate-400">(inherited from linked synset)</em>
-                  </span>
+              <Row label="Definitions">
+                {allDefinitions.length === 0 ? (
+                  <em className="text-slate-400">No definition</em>
                 ) : (
-                  <em className="text-slate-400">none provided</em>
+                  <ul className="space-y-1.5">
+                    {allDefinitions.map((d) => (
+                      <li key={`${d.fromSynset ? "s" : "e"}-${d.language}`} className="flex items-start gap-2">
+                        <span className="pt-0.5">
+                          <LangBadge lang={d.language} />
+                        </span>
+                        <span
+                          lang={d.language === "eng" ? "en" : "bn"}
+                          className={`min-w-0 break-words ${d.language === "eng" ? "" : "font-bengali"} ${
+                            d.fromSynset ? "text-slate-600" : "text-slate-800"
+                          }`}
+                        >
+                          {d.text}{" "}
+                          {sub.synsetAction === "link" ? (
+                            <em className="text-xs not-italic">
+                              {d.fromSynset ? (
+                                <span className="text-slate-400">(existing — linked synset)</span>
+                              ) : (
+                                <span className="font-semibold text-emerald-700">(added by this entry)</span>
+                              )}
+                            </em>
+                          ) : null}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </Row>
               {sub.reviewerNote ? (
@@ -451,14 +487,8 @@ export default async function SubmissionDetailPage({
                         {synset.ili ? <IliChip ili={synset.ili} /> : null}
                       </span>
                     </Row>
-                    <Row label="Gloss">
-                      {synset.definitionText ? (
-                        <span className="font-bengali">
-                          <LangBadge lang={synset.definitionLanguage ?? "ben"} /> {synset.definitionText}
-                        </span>
-                      ) : (
-                        <em className="text-slate-400">no gloss</em>
-                      )}
+                    <Row label="Definitions">
+                      <DefinitionList definitions={synsetDefinitions} />
                     </Row>
                     <Row label="Existing members">
                       {synset.members.length ? (

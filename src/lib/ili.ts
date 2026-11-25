@@ -1,4 +1,4 @@
-/** Sentinel ILI when no Princeton WordNet 2.1 concept applies yet. */
+/** Sentinel ILI when no Princeton WordNet 3.0 concept applies yet. */
 export const ILI_NOT_AVAILABLE = "N/A";
 
 export function isIliNotAvailable(ili?: string | null): boolean {

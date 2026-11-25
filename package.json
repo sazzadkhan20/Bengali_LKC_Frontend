@@ -12,8 +12,7 @@
     "start": "next start",
     "start:standalone": "node .next/standalone/server.js",
     "lint": "eslint .",
-    "clean": "node -e \"const fs=require('fs'); for (const p of ['.next','node_modules/.cache']) { try { fs.rmSync(p,{recursive:true,force:true}); console.log('removed',p) } catch {} }\"",
-    "build:wordnet21": "node scripts/build-wordnet21-ili.mjs"
+    "clean": "node -e \"const fs=require('fs'); for (const p of ['.next','node_modules/.cache']) { try { fs.rmSync(p,{recursive:true,force:true}); console.log('removed',p) } catch {} }\""
   },
   "dependencies": {
     "next": "16.2.11",

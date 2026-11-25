@@ -37,8 +37,6 @@ RUN apk add --no-cache wget libc6-compat
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
-# Princeton WordNet 2.1 ILI registry (used by /api/lookup/ili)
-COPY --from=builder --chown=node:node /app/data/wordnet21-ili.json ./data/wordnet21-ili.json
 
 USER node
 EXPOSE 3000
