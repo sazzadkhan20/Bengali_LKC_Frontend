@@ -33,8 +33,6 @@ response.json
 .env*
 !.env.example
 
-# Raw WordNet source (only the compiled ILI JSON is needed)
-data/wordnet21-src
 
 # Docker meta (not needed inside the build context)
 Dockerfile

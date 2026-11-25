@@ -544,8 +544,8 @@ export const STRINGS = {
   synsetRelations: { en: "Synset relations", bn: "Synset সম্পর্ক" },
   synonyms: { en: "Synonyms", bn: "সমার্থক" },
   noDefinitionYet: {
-    en: "No definition recorded for this concept yet.",
-    bn: "এই ধারণার জন্য এখনো কোনো সংজ্ঞা নেই।",
+    en: "No definition",
+    bn: "কোনো সংজ্ঞা নেই",
   },
   more: { en: "more", bn: "আরও" },
   externalSense: { en: "external sense", bn: "বহিঃস্থ sense" },

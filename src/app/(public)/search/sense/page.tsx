@@ -35,8 +35,7 @@ export default async function SenseSearchPage({
       synsetId: s.synsetId,
       ili: s.ili,
       synsetPos: s.synsetPos,
-      defLang: s.defLang,
-      defText: s.defText,
+      definitions: s.definitions ?? [],
       crowdsourced: s.crowdsourced,
       validatedAt: s.validatedAt,
       relations: s.relations.map((rel) => ({

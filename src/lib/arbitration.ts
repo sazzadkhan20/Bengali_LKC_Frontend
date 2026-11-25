@@ -87,6 +87,10 @@ export type CaseDetail = {
     synsetAction: "link" | "create" | null;
     synsetId: string | null;
     definition: string | null;
+    /** Definitions the linked synset already has. */
+    synsetDefinitions?: { language: string; text: string }[];
+    /** Definitions this entry proposes. */
+    definitions?: { language: string; text: string }[];
     ili: string | null;
     createdAt: string | null;
   };

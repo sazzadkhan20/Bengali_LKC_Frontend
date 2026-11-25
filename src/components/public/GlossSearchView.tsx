@@ -11,7 +11,7 @@ import {
   LexiconUnavailable,
   ResultRange,
 } from "@/components/public/LexiconBits";
-import { EmptyState, IdChip, LangBadge, Pagination } from "@/components/ui";
+import { DefinitionList, EmptyState, IdChip, Pagination } from "@/components/ui";
 import type { GlossSearchResult } from "@/lib/lexicon-api";
 import type { POS } from "@/lib/types";
 
@@ -119,11 +119,11 @@ export function GlossSearchView({
                     </>
                   ) : null}
                 </div>
-                {hit.defText ? (
-                  <p className="font-bengali mt-2 text-sm leading-relaxed text-slate-700">
-                    {hit.defLang ? <LangBadge lang={hit.defLang} /> : null} {hit.defText}
-                  </p>
-                ) : null}
+                <DefinitionList
+                  definitions={hit.definitions}
+                  emptyLabel={t("noDefinitionYet")}
+                  className="mt-2"
+                />
                 <p className="mt-2 text-xs text-slate-500">
                   <span className="font-semibold">{t("wordsLabel")}:</span>{" "}
                   {hit.entries.length === 0 ? (

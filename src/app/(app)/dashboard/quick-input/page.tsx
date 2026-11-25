@@ -28,6 +28,7 @@ type EntryDetail = {
   iliCode: string | null;
   definitionLanguage: "ben" | "eng" | null;
   definitionText: string | null;
+  definitions?: { language: string; text: string }[];
   reviewerNote: string | null;
   editorComment: string | null;
   cleComment: string | null;
@@ -36,6 +37,7 @@ type EntryDetail = {
     ili: string | null;
     pos: POS | null;
     definitionText: string | null;
+    definitions?: { language: string; text: string }[];
     members: string[];
   };
   senseRelationDetails: { relType: string; target: string; writtenForm: string | null }[];
@@ -91,12 +93,14 @@ function entryFields(d: EntryDetail) {
             ili: d.synset.ili ?? "",
             pos: d.synset.pos ?? d.pos,
             definition: d.synset.definitionText ?? undefined,
+            definitions: d.synset.definitions ?? [],
             words: d.synset.members,
           }
         : null,
     iliCode: d.synsetAction === "create" ? d.iliCode : null,
-    definitionLanguage: d.definitionLanguage ?? "ben",
-    definitionText: d.definitionText ?? "",
+    definitions:
+      d.definitions ??
+      (d.definitionText ? [{ language: d.definitionLanguage ?? "ben", text: d.definitionText }] : []),
     reviewerNote: d.reviewerNote ?? "",
     senseRelations: d.senseRelationDetails.map((r) => ({
       relType: r.relType,
@@ -171,12 +175,16 @@ async function loadTieCorrection(
 export default async function QuickInputPage({
   searchParams,
 }: {
-  searchParams: Promise<{ resubmit?: string | string[]; tieCase?: string | string[] }>;
+  searchParams: Promise<{
+    resubmit?: string | string[];
+    tieCase?: string | string[];
+    ili?: string | string[];
+  }>;
 }) {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const { resubmit, tieCase } = await searchParams;
+  const { resubmit, tieCase, ili: iliParam } = await searchParams;
   const tieCaseId = typeof tieCase === "string" ? tieCase.trim() : "";
 
   if (tieCaseId) {
@@ -286,6 +294,12 @@ export default async function QuickInputPage({
     );
   }
 
+  // From the ILI Finder: start a new synset with the chosen WordNet 3.0 code (POS taken from its suffix).
+  const prefillIli = typeof iliParam === "string" ? iliParam.trim().toLowerCase() : "";
+  const prefill = /^\d{8}-[nvar]$/.test(prefillIli)
+    ? { ili: prefillIli, pos: prefillIli.slice(-1) }
+    : undefined;
+
   const exempt = session.role === "SYSTEM_MODERATOR" || session.role === "PLATFORM_ARCHITECT";
   const [captchaConfig, quota] = await Promise.all([
     loadCaptchaConfig(),
@@ -311,7 +325,12 @@ export default async function QuickInputPage({
         </div>
       ) : null}
       <Card className="p-6">
-        <QuickInputForm key="new" role={session.role} captchaConfig={captchaConfig} />
+        <QuickInputForm
+          key={prefill ? `new-${prefill.ili}` : "new"}
+          role={session.role}
+          captchaConfig={captchaConfig}
+          prefill={prefill}
+        />
       </Card>
     </div>
   );

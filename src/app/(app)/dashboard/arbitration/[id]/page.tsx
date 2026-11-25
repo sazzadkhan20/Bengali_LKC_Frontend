@@ -16,7 +16,7 @@ import {
   STATUS_STYLE,
   type CaseDetail,
 } from "@/lib/arbitration";
-import { Card, CardHeader, IdChip, PageTitle, PosBadge, StateBadge } from "@/components/ui";
+import { Card, CardHeader, DefinitionList, IdChip, PageTitle, PosBadge, StateBadge } from "@/components/ui";
 import { CuratorVotePanel, PartyNoteForm } from "@/components/dashboard/ArbitrationActions";
 
 export const metadata: Metadata = { title: "Arbitration Case" };
@@ -305,9 +305,17 @@ export default async function ArbitrationCasePage({ params }: { params: Promise<
                 </span>
               ) : null}
             </p>
-            {s.definition ? (
-              <p className="font-bengali rounded-lg bg-slate-50 px-3 py-2 text-slate-700">{s.definition}</p>
-            ) : null}
+            <div className="rounded-lg bg-slate-50 px-3 py-2">
+              <DefinitionList
+                definitions={
+                  s.definitions || s.synsetDefinitions
+                    ? [...(s.synsetDefinitions ?? []), ...(s.definitions ?? [])]
+                    : s.definition
+                      ? [{ language: "ben", text: s.definition }]
+                      : []
+                }
+              />
+            </div>
             <div>
               <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-400">Contributor note</p>
               <NoteBlock note={c.contributor.note} noteAt={c.contributor.noteAt} tone="emerald" pending={pendingText("contributor")} />

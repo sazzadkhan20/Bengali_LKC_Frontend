@@ -8,7 +8,7 @@ import {
   LexiconUnavailable,
   ValidatedNote,
 } from "@/components/public/LexiconBits";
-import { Card, CardHeader, IdChip, LangBadge, PosBadge } from "@/components/ui";
+import { Card, CardHeader, DefinitionList, IdChip, PosBadge } from "@/components/ui";
 import { REL_LABEL } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -76,17 +76,12 @@ export default async function SynsetDetailPage({
             ) : null}
           </div>
 
-          {synset.definition ? (
-            <p className="font-bengali mt-4 text-lg leading-relaxed text-slate-800">
-              <LangBadge lang={synset.definition.language} />{" "}
-              {synset.definition.text}
-            </p>
-          ) : (
-            <p className="mt-4 text-sm italic text-slate-400">
-              No definition recorded yet — contributors can add one via Quick
-              Input.
-            </p>
-          )}
+          <DefinitionList
+            definitions={synset.definitions}
+            size="lg"
+            emptyLabel="No definition"
+            className="mt-4"
+          />
 
           <div className="mt-5 border-t border-slate-100 pt-4">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
