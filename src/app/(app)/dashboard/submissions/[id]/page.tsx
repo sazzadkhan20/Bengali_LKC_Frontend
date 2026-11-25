@@ -281,8 +281,14 @@ export default async function SubmissionDetailPage({
       (synset?.definitionText ? [{ language: synset.definitionLanguage ?? "ben", text: synset.definitionText }] : [])
   );
   /** Everything the reviewer must check: the linked synset's definitions plus the ones this entry adds. */
+  // Once a linked entry is validated its definitions are on the synset too — list them once, as this entry's.
+  const ownKeys = new Set(ownDefinitions.map((d) => `${d.language}|${d.text.trim()}`));
   const allDefinitions = sortDefinitions([
-    ...(sub.synsetAction === "link" ? synsetDefinitions.map((d) => ({ ...d, fromSynset: true })) : []),
+    ...(sub.synsetAction === "link"
+      ? synsetDefinitions
+          .filter((d) => !ownKeys.has(`${d.language}|${d.text.trim()}`))
+          .map((d) => ({ ...d, fromSynset: true }))
+      : []),
     ...ownDefinitions.map((d) => ({ ...d, fromSynset: false })),
   ]);
   const iliGlossText = sub.iliInfo?.gloss?.trim() ?? "";

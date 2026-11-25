@@ -372,7 +372,7 @@ const quickInputSchema = z
       else if (v.synsetAction === "link" && v.existingLanguages.includes(d.language))
         add(
           ["definitions", i],
-          `The selected synset already has a ${name} definition. Add a definition in another language, or remove this one.`
+          `The selected synset already has a definition in ${name}. Add a definition in another language, or remove this one.`
         );
       else if (firstLang.has(d.language))
         add(
@@ -1642,7 +1642,9 @@ export function QuickInputForm({
                 ))}
                 <li className="text-[11px] text-slate-400">
                   Existing definitions of {selectedSynset.id} are locked.
-                  {canAddDefinition ? " You can add a definition in a language it does not have yet." : " It already has a definition in every supported language."}
+                  {existingDefs.length >= DEF_LANGS.length
+                    ? " It already has a definition in every supported language."
+                    : " You can add a definition in a language it does not have yet."}
                 </li>
               </ul>
             ) : (

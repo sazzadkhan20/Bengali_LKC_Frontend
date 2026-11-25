@@ -50,7 +50,7 @@ export function LangBadge({ lang }: { lang: string }) {
         : "bg-slate-100 text-slate-500 ring-slate-200";
   return (
     <span
-      className={`inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ring-1 ring-inset ${style}`}
+      className={`inline-flex shrink-0 items-center whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide ring-1 ring-inset ${style}`}
     >
       {code || lang}
     </span>
